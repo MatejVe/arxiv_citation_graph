@@ -3,6 +3,8 @@ import time
 import os
 import gzip
 import tarfile
+import chardet
+import re
 
 def retrieve_rawdata(url):
     """
@@ -59,9 +61,82 @@ def unpack_rawdata(rawdata, filename):
             file_.close()
     return
 
+def get_citations(list_of_files):
+    """
+    This function starts with a list of files which could contain
+    citation information and returns a list of arxiv_ids
+    """
+    citations = []
+    for filename in list_of_files:
+        contents = get_data_string(filename)
+        # Check whether we have citation information in this file
+        if contents.find(r'\bibitem') > -1:
+            # remove the text before the first appearance of '\bibitem'
+            contents = contents[contents.find(r'\bibitem'):]
+            # split by bibitem to get a list of citations
+            list_of_bibitems = contents.split(r'\bibitem')
+            for bibitem in list_of_bibitems:
+                # for each citation check whether there is an arxiv_id tag
+                results_arxiv_id = check_for_arxiv_id(bibitem)
+                # for each citation check whether there is an doi tag
+                results_doi = check_for_doi(bibitem)
+                # -> Are there alternatives to the doi and arxiv_id searches above?
+
+                #results_common = check_results(results_arxiv_id, results_doi)
+                #if results_common:
+                citations.append(results_arxiv_id)
+    print("citations = ", citations)
+    return citations
+
+def check_for_arxiv_id(citation):
+    """
+    This function returns arxiv ids using regular expressions.
+    In many cases this regular expression selects false patterns.
+    -> Can you find a better regular expression?
+    """
+    pattern = re.compile('(\d{4}.\d{4,5}|[a-z\-]+(\.[A-Z]{2})?\/\d{7})(v\d+)?', re.IGNORECASE)
+    return list(set([hit[0].lower() for hit in re.findall(pattern, citation)]))
+
+def check_for_doi(citation):
+    """
+    This function returns dois using regular expressions. So far I haven't seen
+    false positive with this selection.
+    Note that while this regular expression matches most dois, it does not match
+    all of them. For more details see
+    https://www.crossref.org/blog/dois-and-matching-regular-expressions/
+    """
+    pattern = re.compile('10.\\d{4,9}/[-._;()/:a-z0-9A-Z]+', re.IGNORECASE)
+    return list(set(re.findall(pattern, citation)))
+
+def get_data_string(filename):
+    """
+    Here we read the data file and decode the byte string
+    """
+    try:
+        with open(filename, 'rb') as f:
+            contents = f.read()
+    except:
+        # So far we had no issue with this, but if it happens we should 
+        # catch the exception
+        print("Can't read file?")
+        raise
+    else:
+        # We need to check how this byte string is encoded
+        detection = chardet.detect(contents)
+        encoding = detection["encoding"]
+        print("encoding = ", encoding)
+        if encoding is None:
+            # Let's try utf-8 and ignore any errors
+            contents = contents.decode('utf-8', 'ignore')
+        else:
+            # Even though we tried to determine the encoding above,
+            # it still happens that we get errors here
+            contents = contents.decode(encoding, 'ignore')
+        return contents
+
 SOURCE_FOLDER = 'dummy'
-url = "http://export.arxiv.org/e-print/1902.00678"
-filename = SOURCE_FOLDER + '/1902_00678'
+url = "http://export.arxiv.org/e-print/0712.2987"
+filename = SOURCE_FOLDER + '/0712_2987'
 rawdata = retrieve_rawdata(url)
 if rawdata is not None:
     unpack_rawdata(rawdata, filename)
@@ -72,3 +147,5 @@ if rawdata is not None:
             all_files.append(os.path.join(path, name))
     list_of_files = [f for f in all_files if (f.endswith('.bbl') or f.endswith('.tex'))]
     print("list_of_files = ", list_of_files)
+
+get_citations(list_of_files)
