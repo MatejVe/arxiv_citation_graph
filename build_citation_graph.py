@@ -160,10 +160,10 @@ def get_citations(list_of_files):
                 # for each citation check whether there is an doi tag
                 results_doi = check_for_doi(bibitem)
                 # -> Are there alternatives to the doi and arxiv_id searches above?
-
-                results_common = check_results(results_arxiv_id, results_doi)
-                if results_common:
-                    citations.append(results_common)
+                citations.append(results_arxiv_id)
+                #results_common = check_results(results_arxiv_id, results_doi)
+                #if results_common:
+                #    citations.append(results_arxiv_id)
     print("citations = ", citations)
     return citations
 

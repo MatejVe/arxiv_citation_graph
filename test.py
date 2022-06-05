@@ -135,8 +135,8 @@ def get_data_string(filename):
         return contents
 
 SOURCE_FOLDER = 'dummy'
-url = "http://export.arxiv.org/e-print/0712.2987"
-filename = SOURCE_FOLDER + '/0712_2987'
+url = "http://export.arxiv.org/e-print/1101.5836"
+filename = SOURCE_FOLDER + '/1101.5836'
 rawdata = retrieve_rawdata(url)
 if rawdata is not None:
     unpack_rawdata(rawdata, filename)
