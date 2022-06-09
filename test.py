@@ -135,17 +135,24 @@ def get_data_string(filename):
         return contents
 
 SOURCE_FOLDER = 'dummy'
-url = "http://export.arxiv.org/e-print/1101.5836"
-filename = SOURCE_FOLDER + '/1101.5836'
-rawdata = retrieve_rawdata(url)
-if rawdata is not None:
-    unpack_rawdata(rawdata, filename)
 
-    all_files = []
-    for path, subdirs, files in os.walk(filename + '.folder_dummy'):
-        for name in files:
-            all_files.append(os.path.join(path, name))
-    list_of_files = [f for f in all_files if (f.endswith('.bbl') or f.endswith('.tex'))]
-    print("list_of_files = ", list_of_files)
+list_of_test_ids = ['1902.00678', '1009.3615', '2010.07848', '1903.12466', '1711.07930', '1103.5007',
+                     '0712.2987', '1904.11042', '1207.4206', '1208.3840', '1703.05187', 'math/0103136', '1403.2332',
+                     'astro-ph/9807138', '1909.03570', '1005.2643', 'hep-th/9211122', '1609.06992', '1912.10120',
+                     '1502.04754']
+
+for id in list_of_test_ids:
+    url = "http://export.arxiv.org/e-print/%s"%id
+    filename = SOURCE_FOLDER + '/%s'%id
+    rawdata = retrieve_rawdata(url)
+    if rawdata is not None:
+        unpack_rawdata(rawdata, filename)
+
+        all_files = []
+        for path, subdirs, files in os.walk(filename + '.folder_dummy'):
+            for name in files:
+                all_files.append(os.path.join(path, name))
+        list_of_files = [f for f in all_files if (f.endswith('.bbl') or f.endswith('.tex'))]
+        print("list_of_files = ", list_of_files)
 
 get_citations(list_of_files)

@@ -9,6 +9,8 @@ import urllib.request
 
 import chardet
 
+from arxiv_regex import *
+
 SOURCE_FOLDER = 'dummy'
 
 # random set of 100 arxiv_ids for test purposes
@@ -155,15 +157,17 @@ def get_citations(list_of_files):
             # split by bibitem to get a list of citations
             list_of_bibitems = contents.split(r'\bibitem')
             for bibitem in list_of_bibitems:
+                # for each citation check whether there is an doi tag
+                # Since DOI is a strong identifier and the regex doesn't
+                # seem to be producing false positives we save the doi
+                results_doi = check_for_doi(bibitem)
                 # for each citation check whether there is an arxiv_id tag
                 results_arxiv_id = check_for_arxiv_id(bibitem)
-                # for each citation check whether there is an doi tag
-                results_doi = check_for_doi(bibitem)
                 # -> Are there alternatives to the doi and arxiv_id searches above?
                 citations.append(results_arxiv_id)
-                #results_common = check_results(results_arxiv_id, results_doi)
-                #if results_common:
-                #    citations.append(results_arxiv_id)
+                results_common = check_results(results_arxiv_id, results_doi)
+                if results_common:
+                    citations.append(results_common)
     print("citations = ", citations)
     return citations
 
@@ -204,6 +208,29 @@ def check_for_arxiv_id(citation):
     pattern = re.compile('(\d{4}.\d{4,5}|[a-z\-]+(\.[A-Z]{2})?\/\d{7})(v\d+)?', re.IGNORECASE)
     return list(set([hit[0].lower() for hit in re.findall(pattern, citation)]))
 
+def check_for_arxiv_id_simple(citation):
+    """
+    Simple arxiv id checking using regex
+    """
+    return list(set([hit[0].lower() for hit in re.findall(REGEX_ARXIV_SIMPLE, citation)]))
+
+def check_for_arxiv_id_strict(citation):
+    """
+    Strict regex for finding arxiv ids. This will essentially only match if the 
+    format of the arxiv id is exactly as specified https://arxiv.org/help/arxiv_identifier
+    Seems to have no false positives but on the other hand it doesn't detect a lot of
+    arxiv ids
+    """
+    return list(set([hit[0].lower() for hit in re.findall(REGEX_ARXIV_STRICT, citation)]))
+
+def check_for_arxiv_id_flexible(citation):
+    """
+    Flexible regex for finding arxiv ids. As specified in the arxiv_regex.py:
+    this regex essentially accepts anything that looks like an arxiv id and has
+    the slightest smell of being one as well. that is, if it is an id and
+    mentions anything about the arxiv before hand, then it is an id.
+    """
+    return list(set([hit[0].lower() for hit in re.findall(REGEX_ARXIV_FLEXIBLE, citation)]))
 
 def check_for_doi(citation):
     """
