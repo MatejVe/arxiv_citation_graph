@@ -161,13 +161,36 @@ def get_citations(list_of_files):
                 # Since DOI is a strong identifier and the regex doesn't
                 # seem to be producing false positives we save the doi
                 results_doi = check_for_doi(bibitem)
-                # for each citation check whether there is an arxiv_id tag
-                results_arxiv_id = check_for_arxiv_id(bibitem)
-                # -> Are there alternatives to the doi and arxiv_id searches above?
-                citations.append(results_arxiv_id)
-                results_common = check_results(results_arxiv_id, results_doi)
-                if results_common:
-                    citations.append(results_common)
+                if results_doi:
+                    citations.append([results_doi, 'doi'])
+                # TODO: rewrite this code logic when you think of something better
+                # next we do a strict arxiv id check
+                # strict arxiv is reliable and if there is a strict arxiv id then save it
+                strict_arxiv_id = check_for_arxiv_id_strict(bibitem)
+                if strict_arxiv_id and not results_doi:
+                    citations.append([strict_arxiv_id, 'said']) # aid stands for strict arxiv id
+                
+                # finally do a flexible arxiv id check
+                # this one might catch quite a few false positives
+                # so some type of doublechecking is needed
+                flexible_arxiv_id = check_for_arxiv_id_flexible(bibitem)
+                if flexible_arxiv_id and not strict_arxiv_id and not results_doi:
+                    # perhaps doublechecking with the author names through arxiv API?
+                    author_names = extract_authors(bibitem)
+                    # use the arxiv API to find papers whose authors we have just extracted
+                    # we extract their arxiv ids and compare to the one we have extracted
+                    citations.append([flexible_arxiv_id, 'faid'])
+                    #API_ids = arxiv_API_author_ids(author_names)
+                    #for API_id in API_ids:
+                    #    if API_id == flexible_arxiv_id:
+                    #        citations.append([flexible_arxiv_id, 'faid']) #faid stands for flexible arxiv id
+                else:
+                    # If all of these methods fail we need to utilize some other method
+                    # Here functions utilizing other online resources will be
+                    # For no we will just append an indicator to the citations list
+                    citations.append('')
+                
+                
     print("citations = ", citations)
     return citations
 
@@ -221,7 +244,16 @@ def check_for_arxiv_id_strict(citation):
     Seems to have no false positives but on the other hand it doesn't detect a lot of
     arxiv ids
     """
-    return list(set([hit[0].lower() for hit in re.findall(REGEX_ARXIV_STRICT, citation)]))
+    raw_hits = re.findall(REGEX_ARXIV_STRICT, citation)
+    # every hit is a tuple whose entries correspond to the regex groups of the expression
+    # we need to find which group produced a hit
+    # TODO: find better naming for all this
+    hits = []
+    for hit in raw_hits:
+        for group in hit:
+            if group:
+                hits.append(group.lower())
+    return list(set(hits))
 
 def check_for_arxiv_id_flexible(citation):
     """
@@ -230,7 +262,16 @@ def check_for_arxiv_id_flexible(citation):
     the slightest smell of being one as well. that is, if it is an id and
     mentions anything about the arxiv before hand, then it is an id.
     """
-    return list(set([hit[0].lower() for hit in re.findall(REGEX_ARXIV_FLEXIBLE, citation)]))
+    raw_hits = re.findall(REGEX_ARXIV_FLEXIBLE, citation)
+    # every hit is a tuple whose entries correspond to the regex groups of the expression
+    # we need to find which group produced a hit
+    # TODO: come up with better naming conventions for all this
+    hits = []
+    for hit in raw_hits:
+        for group in hit:
+            if group:
+                hits.append(group.lower())
+    return list(set(hits))
 
 def check_for_doi(citation):
     """
@@ -243,13 +284,25 @@ def check_for_doi(citation):
     pattern = re.compile('10.\\d{4,9}/[-._;()/:a-z0-9A-Z]+', re.IGNORECASE)
     return list(set(re.findall(pattern, citation)))
 
+def extract_authors(bibitem):
+    """
+    This function takes a citation and extracts the names of the authors.
+    I'm not yet sure how to do this, some research is needed.    
+    """
+    return
 
-def check_results(result1, result2):
+def extract_title(bibitem):
     """
-    This function takes the doi and arxiv_id candidates and
-    removes false positive detections
+    Similar to extract_authors. Not sure if will be needed just now.
     """
-    # -> Your code here
+    return
+
+def arxiv_API_author_ids(author_names):
+    """
+    This function makes use of the arXiv API to find all the papers
+    related to given authors. It extracts all the arXiv ids related
+    to those papers and returns them in a list.
+    """
     return
 
 build_graph()

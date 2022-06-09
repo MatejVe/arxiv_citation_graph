@@ -204,3 +204,5 @@ TEST_NEGATIVE = [
     'doi: 10.1145/ 321105.321114 ',
     'doi: 10.1145/ 1105.321114 ',
 ]
+
+print([hit for hit in re.findall(REGEX_ARXIV_STRICT, ' '.join(TEST_POSITIVE))])
