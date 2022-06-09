@@ -36,17 +36,24 @@ list_of_paper_ids = ['1902.00678', '1009.3615', '2010.07848', '1903.12466', '171
                      '1111.3549', '1811.12551', 'cond-mat/0203121', 'gr-qc/9401023']
 
 
+subset_of_papers_ids = ['1902.00678', '1009.3615', '2010.07848', '1903.12466', '1711.07930', '1103.5007',
+                     '0712.2987', '1904.11042', '1207.4206', '1208.3840', '1703.05187', 'math/0103136', '1403.2332',
+                     'astro-ph/9807138', '1909.03570', '1005.2643', 'hep-th/9211122', '1609.06992', '1912.10120']
+
 def build_graph():
     """
     This function takes the arxiv ids above, downloads the files for this
     paper (get_file), and extracts the citations (get_citations)
     """
-    for i, paper_id in enumerate(list_of_paper_ids):
+    citations_number = 0
+    for i, paper_id in enumerate(subset_of_papers_ids):
         print("process paper %s, %d" % (paper_id, i))
         filename, list_of_files = get_file(paper_id)
         if list_of_files:
             citations = get_citations(list_of_files)
-
+            for citation in citations:
+                if citation:
+                    citations_number += 1
             # Here we will store the citations in the database
             # citations should contain a relyable list of identifiers,
             # such as dois or arxiv_ids
@@ -58,6 +65,7 @@ def build_graph():
         if os.path.exists(filename + '.folder_dummy'):
             print("Delete folder %s.folder_dummy" % filename)
             shutil.rmtree(filename + '.folder_dummy')
+    print(f'Total number of found citations is {citations_number}.')
     return
 
 
