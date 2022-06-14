@@ -8,6 +8,15 @@ arXiv is a database of publications. Each publication references several other p
 
 The idea of the project is to use the arXiv API to gather data about the papers. Arxiv gives a unique ID to every paper that is submited. Knowing the ID of a paper, it can easily be downloaded using the following query ```http://export.arxiv.org/e-print/paper_id```. After some manipulation, the downloaded files are checked for either a raw .tex file, or a .bib file. Both of these might contain citations withing them. Specifically, the ```\bibitem``` tag can be utilized to find references. ArXiv ids are checked for first, as they are a very reliable identification. We will be implementing our own arXiv id finder but a good script can be found here [arxiv-public-datasets/arxiv_public_data/regex_arxiv.py](https://github.com/mattbierbaum/arxiv-public-datasets/blob/master/arxiv_public_data/regex_arxiv.py). Second, DOIs for each reference are found. DOI (digital object identifier) is perhaps the best identificator we can find. If neither of these two identificators are present, some other methods must be utilized. We can try extracting author names and the title of the paper and try searching the arXiv archive itself. Furthermore, other online resources can be utilized, such as [crossref](https://www.crossref.org/documentation/retrieve-metadata/rest-api/).
 
+Unfortunatelly, such firm methods of referencing are found in a minority of references. When utilizing the online DOI regex, and with the addition of STRICT_ARXIV_ID and
+FLEXIBLE_ARXIV_ID, in a test set of a 100 papers only 13.85% of references are found (total number of references is 4555 and we find 631 reference).
+
+This is why we have to turn our attention to references that contain neither. Most popular methods for
+understanding such references involve machine learning and natural language
+processing. To that end, we have found a great papaer that describes in detail
+the methods utilized in such parsing: [Identify and extract entities from
+bibliography references in a free text](https://essay.utwente.nl/73817/1/chenet_MA_EEMCS.pdf).
+
 ## Code description
 
 Note: lots of bad referencing within the files. Perhaps arXiv files could be found by searching up author's names within arXiv's files. Supplemented by additional info (say publication year or whatever else can be found) it might prove to be reliable enough to supplement arXiv ID matching or DOI matching.
