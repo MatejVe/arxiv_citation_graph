@@ -10,6 +10,10 @@ The idea of the project is to use the arXiv API to gather data about the papers.
 
 Unfortunatelly, such firm methods of referencing are found in a minority of references. When utilizing the online DOI regex, and with the addition of STRICT_ARXIV_ID and
 FLEXIBLE_ARXIV_ID, in a test set of a 100 papers only 13.85% of references are found (total number of references is 4555 and we find 631 reference).
+The previous arxiv id regex (in addition to the doi regex) found 16.01%
+of the references in the test set (found references 677, total 4227 mismatch?? -
+find cause). However, some of these references are a false positive and I believe
+that the strong arxiv checking is a better way of identifing references.
 
 This is why we have to turn our attention to references that contain neither. Most popular methods for
 understanding such references involve machine learning and natural language

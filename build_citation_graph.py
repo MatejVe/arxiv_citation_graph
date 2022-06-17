@@ -10,6 +10,7 @@ import urllib.request
 import chardet
 
 from arxiv_regex import *
+from crossref.restful import Works
 
 SOURCE_FOLDER = 'dummy'
 
@@ -46,7 +47,7 @@ def build_graph():
     """
     found_citations = 0
     total_citations = 0
-    for i, paper_id in enumerate(list_of_paper_ids):
+    for i, paper_id in enumerate(subset_of_papers_ids):
         print("process paper %s, %d" % (paper_id, i))
         filename, list_of_files = get_file(paper_id)
         if list_of_files:
@@ -57,7 +58,7 @@ def build_graph():
                 if citation:
                     found_citations += 1
             # Here we will store the citations in the database
-            # citations should contain a relyable list of identifiers,
+            # citations should contain a reliable list of identifiers,
             # such as dois or arxiv_ids
 
         # To avoid running out of disk space we delete everything imidiatly
@@ -159,6 +160,7 @@ def get_citations(list_of_files):
     This function starts with a list of files which could contain
     citation information and returns a list of arxiv_ids
     """
+    works = Works()
     citations = []
     for filename in list_of_files:
         contents = get_data_string(filename)
@@ -168,7 +170,9 @@ def get_citations(list_of_files):
             contents = contents[contents.find(r'\bibitem'):]
             # split by bibitem to get a list of citations
             list_of_bibitems = contents.split(r'\bibitem')
-            for bibitem in list_of_bibitems:
+            print(f'Found {len(list_of_bibitems)} references.')
+            for i, bibitem in enumerate(list_of_bibitems):
+                print(f'Processing reference number {i}.')
                 # for each citation check whether there is an doi tag
                 # Since DOI is a strong identifier and the regex doesn't
                 # seem to be producing false positives we save the doi
@@ -187,20 +191,15 @@ def get_citations(list_of_files):
                 # so some type of doublechecking is needed
                 flexible_arxiv_id = check_for_arxiv_id_flexible(bibitem)
                 if flexible_arxiv_id and not strict_arxiv_id and not results_doi:
-                    # perhaps doublechecking with the author names through arxiv API?
-                    author_names = extract_authors(bibitem)
-                    # use the arxiv API to find papers whose authors we have just extracted
-                    # we extract their arxiv ids and compare to the one we have extracted
                     citations.append([flexible_arxiv_id, 'faid'])
-                    #API_ids = arxiv_API_author_ids(author_names)
-                    #for API_id in API_ids:
-                    #    if API_id == flexible_arxiv_id:
-                    #        citations.append([flexible_arxiv_id, 'faid']) #faid stands for flexible arxiv id
                 else:
                     # If all of these methods fail we need to utilize some other method
                     # Here functions utilizing other online resources will be
                     # For no we will just append an indicator to the citations list
-                    citations.append('')
+                    if bibitem:
+                        citations.append([get_crossref_doi(bibitem, works), 'crossDOI'])
+                    else:
+                        citations.append('')
                 
                 
     print("citations = ", citations)
@@ -296,25 +295,21 @@ def check_for_doi(citation):
     pattern = re.compile('10.\\d{4,9}/[-._;()/:a-z0-9A-Z]+', re.IGNORECASE)
     return list(set(re.findall(pattern, citation)))
 
-def extract_authors(bibitem):
+def get_crossref_doi(bibitem, works):
     """
-    This function takes a citation and extracts the names of the authors.
-    I'm not yet sure how to do this, some research is needed.    
-    """
-    return
+    This is function that utilizes the crossref module to communicate with the
+    crossref API. Given bibitem is processed on the crossref servers which try
+    to match a reference to one of the works in their database. Subsequently,
+    metadata about the reference can be extracted back.
 
-def extract_title(bibitem):
+    One issue is that crossref will always try to match a work to a reference,
+    so even if a reference doesn't exist crossref will find something.
     """
-    Similar to extract_authors. Not sure if will be needed just now.
-    """
-    return
+    w = works.query(bibliographic=bibitem)
 
-def arxiv_API_author_ids(author_names):
-    """
-    This function makes use of the arXiv API to find all the papers
-    related to given authors. It extracts all the arXiv ids related
-    to those papers and returns them in a list.
-    """
-    return
+    for item in w:
+        bestItem = item
+        break
+    return bestItem['DOI']
 
 build_graph()

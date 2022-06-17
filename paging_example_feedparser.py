@@ -29,7 +29,7 @@ base_url = 'http://export.arxiv.org/api/query?';
 # Search parameters
 search_query = 'all:biophysics'  # search for electron in all fields
 start = 0  # start at the first result
-total_results = 20  # want 20 total results
+total_results = 5  # want 20 total results
 results_per_iteration = 5  # 5 results at a time
 wait_time = 3  # number of seconds to wait beetween calls
 
