@@ -10,7 +10,8 @@ import urllib.request
 import chardet
 
 from arxiv_regex import *
-from crossref.restful import Works
+from habanero import Crossref
+import time
 
 SOURCE_FOLDER = 'dummy'
 
@@ -160,7 +161,6 @@ def get_citations(list_of_files):
     This function starts with a list of files which could contain
     citation information and returns a list of arxiv_ids
     """
-    works = Works()
     citations = []
     for filename in list_of_files:
         contents = get_data_string(filename)
@@ -197,7 +197,10 @@ def get_citations(list_of_files):
                     # Here functions utilizing other online resources will be
                     # For no we will just append an indicator to the citations list
                     if bibitem:
-                        citations.append([get_crossref_doi(bibitem, works), 'crossDOI'])
+                        time1 = time.time()
+                        citations.append([get_crossref_doi(bibitem), 'crossDOI'])
+                        time2 = time.time()
+                        print(f'Time taken to retrieve DOI for a reference was: {time2-time1:.2f}s')
                     else:
                         citations.append('')
                 
@@ -295,9 +298,9 @@ def check_for_doi(citation):
     pattern = re.compile('10.\\d{4,9}/[-._;()/:a-z0-9A-Z]+', re.IGNORECASE)
     return list(set(re.findall(pattern, citation)))
 
-def get_crossref_doi(bibitem, works):
+def get_crossref_doi(bibitem):
     """
-    This is function that utilizes the crossref module to communicate with the
+    This is function that utilizes the habanero module to communicate with the
     crossref API. Given bibitem is processed on the crossref servers which try
     to match a reference to one of the works in their database. Subsequently,
     metadata about the reference can be extracted back.
@@ -305,11 +308,9 @@ def get_crossref_doi(bibitem, works):
     One issue is that crossref will always try to match a work to a reference,
     so even if a reference doesn't exist crossref will find something.
     """
-    w = works.query(bibliographic=bibitem)
-
-    for item in w:
-        bestItem = item
-        break
+    cr = Crossref()
+    x = cr.works(query=bibitem, limit=1)
+    bestItem = x['message']['items'][0]
     return bestItem['DOI']
 
 build_graph()

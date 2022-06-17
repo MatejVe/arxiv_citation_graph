@@ -21,6 +21,8 @@ processing. To that end, we have found a great papaer that describes in detail
 the methods utilized in such parsing: [Identify and extract entities from
 bibliography references in a free text](https://essay.utwente.nl/73817/1/chenet_MA_EEMCS.pdf).
 
+Luckily, crossref offers automatic parsing of pure text references. Details can be found online (PUT A LINK HERE!). This automatic parsing can be accesed through their API as well. The problem is, it is optimized for pure text inputs, while we are getting access to latex code at the moment. How it affects performance remains to be seen. Furthermore, querying the API is time intensive: each reference query takes between 1s - 5s, significantly increasing the running time.
+
 ## Code description
 
 Note: lots of bad referencing within the files. Perhaps arXiv files could be found by searching up author's names within arXiv's files. Supplemented by additional info (say publication year or whatever else can be found) it might prove to be reliable enough to supplement arXiv ID matching or DOI matching.
