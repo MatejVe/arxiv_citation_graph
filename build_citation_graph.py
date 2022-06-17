@@ -167,9 +167,16 @@ def get_citations(list_of_files):
         # Check whether we have citation information in this file
         if contents.find(r'\bibitem') > -1:
             # remove the text before the first appearance of '\bibitem'
-            contents = contents[contents.find(r'\bibitem'):]
+            # and after the appearance of '\end{thebibliography}
+            first_bibitem = contents.find(r'\bibitem')
+            bibliography_end = contents.find(r'\end{thebibliography}')
+            contents = contents[first_bibitem:bibliography_end]
             # split by bibitem to get a list of citations
             list_of_bibitems = contents.split(r'\bibitem')
+            # Filter the list of empty '' tags
+            list_of_bibitems = list(filter(lambda item: item, list_of_bibitems))
+            # Strip the empty spaces
+            list_of_bibitems = [item.strip() for item in list_of_bibitems]
             print(f'Found {len(list_of_bibitems)} references.')
             for i, bibitem in enumerate(list_of_bibitems):
                 print(f'Processing reference number {i}.')
