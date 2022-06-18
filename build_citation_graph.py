@@ -56,7 +56,7 @@ def build_graph():
             total_citations += len(citations)
 
             for citation in citations:
-                if citation:
+                if citation[1] != 'crossDOI':
                     found_citations += 1
             # Here we will store the citations in the database
             # citations should contain a reliable list of identifiers,
@@ -69,9 +69,9 @@ def build_graph():
         if os.path.exists(filename + '.folder_dummy'):
             print("Delete folder %s.folder_dummy" % filename)
             shutil.rmtree(filename + '.folder_dummy')
-    print(f'Total number of found citations is {found_citations}.')
-    print(f'Total number of citations is {total_citations}.')
-    print(f'Percentage of found citations is {found_citations/total_citations}.')
+        print(f'Total number of arxiv and regex DOI citations is {found_citations}.')
+        print(f'Total number of citations is {total_citations}.')
+        print(f'Percentage of arxiv and regex DOI citations is {found_citations/total_citations}.')
     return
 
 
