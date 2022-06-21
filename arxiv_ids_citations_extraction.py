@@ -200,7 +200,7 @@ def get_proportion_of_arxiv_ids(list_of_files):
 
 
 
-with open("arxiv_ids_by_years_all_hep-ex", "r") as datafile:
+with open("arxiv_ids_by_years_all_hep-ex.json", "r") as datafile:
     arxiv_ids = json.load(datafile)
 
 import statistics as stats

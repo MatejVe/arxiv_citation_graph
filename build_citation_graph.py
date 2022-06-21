@@ -315,8 +315,15 @@ def get_crossref_doi(bibitem):
     One issue is that crossref will always try to match a work to a reference,
     so even if a reference doesn't exist crossref will find something.
     """
-    cr = Crossref()
-    x = cr.works(query=bibitem, limit=1)
+    cr = Crossref() # TODO: add an email adress to get into the polite pool
+                    # sample: Crossref(mailto="foo@bar.com")
+    
+    # TODO: improve by querying the query.bibliographic, see
+    # https://github.com/sckott/habanero/blob/main/habanero/crossref/crossref.py
+    # and _Fieldquery within the file
+    # TODO: extract the confidence of the reference matching (score)
+    # It can be accessed as follows: x['message']['items'][0]['score']
+    x = cr.works(query_bibliographic=bibitem, limit=1)
     bestItem = x['message']['items'][0]
     return bestItem['DOI']
 
