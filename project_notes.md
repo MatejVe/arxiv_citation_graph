@@ -31,3 +31,5 @@ Results
 
 Note: lots of bad referencing within the files. Perhaps arXiv files could be found by searching up author's names within arXiv's files. Supplemented by additional info (say publication year or whatever else can be found) it might prove to be reliable enough to supplement arXiv ID matching or DOI matching.
 A great deal of references won't be in arXiv at all, mostly because they were published before arXiv was created. See if there is any use in cross-checking author names or is it better to only focus on arXiv ids and DOIs.
+
+[crossref blog on reference matching](https://www.crossref.org/categories/reference-matching/#:~:text=Matching%20(or%20resolving)%20bibliographic%20references,indexes%2C%20impact%20factors%2C%20etc)

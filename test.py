@@ -1,7 +1,14 @@
-import urllib.request
+from habanero import Crossref
 
-base_url = 'http://export.arxiv.org/api/query?';
-search_query = urllib.parse.quote("cat:gr-qc")
-query = 'search_query=%s&start=%i&max_results=%i' % (search_query, 0, 10)
-response = urllib.request.urlopen(base_url+query).read()
-print(response)
+cr = Crossref()
+x = cr.works(query_bibliographic='Kim, J.-G., Kim, W.-T., Ostriker, E. C., & Skinner, M. A. 2017, ApJ, 851, 93',
+            limit=1)
+print(x['status'])
+print(x['message-type'])
+print(x['message-version'])
+print(x['message']['facets'])
+print(x['message']['total-results'])
+print(x['message']['items-per-page'])
+print(x['message']['query'])
+print(x['message']['items'][0].keys())
+print(x['message']['items'][0]['score'])
