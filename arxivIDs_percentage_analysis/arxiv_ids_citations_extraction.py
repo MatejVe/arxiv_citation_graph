@@ -1,5 +1,5 @@
 import json
-from arxiv_regex import *
+import arxiv_regex as ar
 
 import gzip
 import os
@@ -123,7 +123,7 @@ def check_for_arxiv_id_strict(citation):
     Seems to have no false positives but on the other hand it doesn't detect a lot of
     arxiv ids
     """
-    raw_hits = re.findall(REGEX_ARXIV_STRICT, citation)
+    raw_hits = re.findall(ar.REGEX_ARXIV_STRICT, citation)
     # every hit is a tuple whose entries correspond to the regex groups of the expression
     # we need to find which group produced a hit
     # TODO: find better naming for all this
@@ -141,7 +141,7 @@ def check_for_arxiv_id_flexible(citation):
     the slightest smell of being one as well. that is, if it is an id and
     mentions anything about the arxiv before hand, then it is an id.
     """
-    raw_hits = re.findall(REGEX_ARXIV_FLEXIBLE, citation)
+    raw_hits = re.findall(ar.REGEX_ARXIV_FLEXIBLE, citation)
     # every hit is a tuple whose entries correspond to the regex groups of the expression
     # we need to find which group produced a hit
     # TODO: come up with better naming conventions for all this

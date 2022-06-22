@@ -9,7 +9,7 @@ import urllib.request
 
 import chardet
 
-from arxiv_regex import *
+from arxiv_regex.arxiv_regex import *
 from habanero import Crossref
 import time
 
