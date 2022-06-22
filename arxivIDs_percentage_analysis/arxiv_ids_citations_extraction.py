@@ -1,5 +1,4 @@
 import json
-import matplotlib.pyplot as plt
 from arxiv_regex import *
 
 import gzip
@@ -200,12 +199,10 @@ def get_proportion_of_arxiv_ids(list_of_files):
 
 
 
-with open("arxiv_ids_by_years_grqc.json", "r") as datafile:
+with open("arxiv_ids_by_years_all_hep-ex.json", "r") as datafile:
     arxiv_ids = json.load(datafile)
 
-import statistics as stats
-
-citations_percentage = []
+citations_percentage = {}
 
 for year in arxiv_ids:
     year_data = []
@@ -226,12 +223,7 @@ for year in arxiv_ids:
             shutil.rmtree(filename + '.folder_dummy')
     # Get mean and sample variance
     if year_data:
-        citations_percentage.append((stats.mean(year_data), stats.stdev(year_data)))
+        citations_percentage[year] = year_data
 
-years = [int(year) for year in arxiv_ids.keys()]
-percentages = [item[0] for item in citations_percentage]
-err = [item[1] for item in citations_percentage]
-
-with open('arxiv_id_percentage_grqc', 'w') as datafile:
-    for year, perc, er in zip(years, percentages, err):
-        datafile.write(f'{year} {perc} {er}\n')
+with open('arxiv_id_percentage_hep-ex.json', 'w') as datafile:
+    json.dump(citations_percentage, datafile)
