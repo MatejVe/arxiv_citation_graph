@@ -54,5 +54,5 @@ while (int(year) > 1992): #stop requesting when we reach the year 2022
     i += results_per_iteration
     time.sleep(wait_time)
 
-with open("arxiv_ids_by_years_all_hep-ex", "w") as outfile:
+with open("arxivIDs_percentage_analysis/arxiv_ids_by_years_all_hep-ex", "w") as outfile:
     json.dump(papers_by_year, outfile)

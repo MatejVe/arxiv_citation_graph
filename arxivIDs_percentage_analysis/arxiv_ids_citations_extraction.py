@@ -199,7 +199,7 @@ def get_proportion_of_arxiv_ids(list_of_files):
 
 
 
-with open("arxiv_ids_by_years_all_hep-ex.json", "r") as datafile:
+with open("arxivIDs_percentage_analysis/arxiv_ids_by_years_all_hep-ex.json", "r") as datafile:
     arxiv_ids = json.load(datafile)
 
 citations_percentage = {}
@@ -225,5 +225,5 @@ for year in arxiv_ids:
     if year_data:
         citations_percentage[year] = year_data
 
-with open('arxiv_id_percentage_hep-ex.json', 'w') as datafile:
+with open('arxivIDs_percentage_analysis/arxiv_id_percentage_hep-ex.json', 'w') as datafile:
     json.dump(citations_percentage, datafile)
