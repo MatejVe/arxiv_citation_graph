@@ -299,8 +299,8 @@ def get_citations(list_of_files):
                 strict_arxiv_id = check_for_arxiv_id_strict(bibitem)
                 if strict_arxiv_id and not results_doi:
                     citations.append(
-                        [strict_arxiv_id, "said"]
-                    )  # aid stands for strict arxiv id
+                        [strict_arxiv_id, "said"]  # said stands for strict arxiv id
+                    )
 
                 # finally do a flexible arxiv id check
                 # this one might catch quite a few false positives
@@ -434,7 +434,7 @@ def get_crossref_doi(bibitem):
     One issue is that crossref will always try to match a work to a reference,
     so even if a reference doesn't exist crossref will find something.
     """
-    cr = Crossref()  # TODO: add an email adress to get into the polite pool
+    cr = Crossref(mailto="matejvedak@gmail.com")  # TODO: add an email adress to get into the polite pool
     # sample: Crossref(mailto="foo@bar.com")
 
     # TODO: improve by querying the query.bibliographic, see
