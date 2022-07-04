@@ -147,9 +147,11 @@ def build_graph():
     This function takes the arxiv ids above, downloads the files for this
     paper (get_file), and extracts the citations (get_citations)
     """
-    found_citations = 0
+    arxiv_id_citations = 0
+    doi_citations = 0
+    crossref_citations = 0
     total_citations = 0
-    for i, paper_id in enumerate(subset_of_papers_ids):
+    for i, paper_id in enumerate(list_of_paper_ids):
         print("process paper %s, %d" % (paper_id, i))
         filename, list_of_files = get_file(paper_id)
         if list_of_files:
@@ -157,8 +159,12 @@ def build_graph():
             total_citations += len(citations)
 
             for citation in citations:
-                if citation[1] != "crossDOI":
-                    found_citations += 1
+                if citation and citation[1] == "doi":
+                    doi_citations += 1
+                elif citation and (citation[1] == 'said' or citation[1] == 'faid'):
+                    arxiv_id_citations += 1
+                elif citation and citation[1] == 'crossDOI':
+                    crossref_citations += 1
             # Here we will store the citations in the database
             # citations should contain a reliable list of identifiers,
             # such as dois or arxiv_ids
@@ -170,12 +176,16 @@ def build_graph():
         if os.path.exists(filename + ".folder_dummy"):
             print("Delete folder %s.folder_dummy" % filename)
             shutil.rmtree(filename + ".folder_dummy")
-        print(f"Total number of arxiv and regex DOI citations is {found_citations}.")
+        print(f'Total number of DOI citations is {doi_citations}.')
+        print(f"Total number of arxiv citations is {arxiv_id_citations}.")
+        print(f'Had to resort to crossref {crossref_citations} times.')
         print(f"Total number of citations is {total_citations}.")
         print(
-            f"Percentage of arxiv and regex DOI citations is {found_citations/total_citations}."
+            f"Percentage of DOI citations is {doi_citations/total_citations}."
         )
-    return
+        print(f'Percentage of arXiv citations is {arxiv_id_citations/total_citations}.')
+        print(f'Percentage of crossref resort is {crossref_citations/total_citations}.')
+    return (arxiv_id_citations, doi_citations, crossref_citations, total_citations)
 
 
 def get_file(paper_id):
@@ -310,11 +320,13 @@ def get_citations(list_of_files):
                     citations.append([flexible_arxiv_id, "faid"])
                 else:
                     # If all of these methods fail we need to utilize some other method
-                    # Here functions utilizing other online resources will be
-                    # For no we will just append an indicator to the citations list
+                    # Here functions utilizing other online resources will be utilized
+                    # For no references we will just append an indicator to the citations list
                     if bibitem:
                         time1 = time.time()
-                        citations.append([get_crossref_doi(bibitem), "crossDOI"])
+                        crossrefDOI = get_crossref_doi(bibitem)
+                        if crossrefDOI:
+                            citations.append([crossrefDOI, "crossDOI"])
                         time2 = time.time()
                         print(
                             f"Time taken to retrieve DOI for a reference was: {time2-time1:.2f}s"
@@ -443,8 +455,28 @@ def get_crossref_doi(bibitem):
     # TODO: extract the confidence of the reference matching (score)
     # It can be accessed as follows: x['message']['items'][0]['score']
     x = cr.works(query_bibliographic=bibitem, limit=1)
-    bestItem = x["message"]["items"][0]
-    return bestItem["DOI"]
+    if x["message"]["items"]:
+        bestItem = x["message"]["items"][0]
+        return bestItem["DOI"]
+    return None
 
 
-build_graph()
+a, d, c, t = build_graph()
+
+import matplotlib.pyplot as plt
+labels = 'arXiv IDs', 'DOIs', 'crossref resort'
+sizes_true = [a, d, c]
+sizes_perc = [a/t, d/t, c/t]
+explode = (0.1, 0, 0)
+
+fig, ax = plt.subplots()
+ax.pie(sizes_true, explode=explode, labels=labels, autopct='%1.1f%%', shadow=True, startangle=90)
+ax.axis('equal')
+plt.savefig('test_subset_occurences_numbers')
+plt.close()
+
+fig, ax = plt.subplots()
+ax.pie(sizes_perc, explode=explode, labels=labels, autopct='%1.1f%%', shadow=True, startangle=90)
+ax.axis('equal')
+plt.savefig('test_subset_occurences_percentage')
+plt.close()
