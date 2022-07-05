@@ -2,6 +2,7 @@ import gzip
 import os
 import re
 import shutil
+import sqlite3
 import tarfile
 import time
 import urllib.error
@@ -147,34 +148,49 @@ def build_graph():
     This function takes the arxiv ids above, downloads the files for this
     paper (get_file), and extracts the citations (get_citations)
     """
-    found_citations = 0
-    total_citations = 0
-    for i, paper_id in enumerate(subset_of_papers_ids):
+    con = sqlite3.connect("test.db")
+    cur = con.cursor()
+    cur.execute(
+        """CREATE TABLE reference_tree
+                (paper_id, reference_num, reference_type, reference_identificator)"""
+    )
+
+    for i, paper_id in enumerate(list_of_paper_ids):
         print("process paper %s, %d" % (paper_id, i))
         filename, list_of_files = get_file(paper_id)
         if list_of_files:
             citations = get_citations(list_of_files)
-            total_citations += len(citations)
-
-            for citation in citations:
-                if citation[1] != "crossDOI":
-                    found_citations += 1
             # Here we will store the citations in the database
             # citations should contain a reliable list of identifiers,
             # such as dois or arxiv_ids
+            for i, citation in enumerate(citations):
+                identificator, tip = citation[0], citation[-1]
+                print(identificator)
+                cur.execute(
+                    "INSERT INTO reference_tree VALUES (?, ?, ?, ?)",
+                    (paper_id, i, tip, identificator),
+                )  # tip is Croatian for type, can't use type since it is a reserved keyword
+                con.commit()
 
-        # To avoid running out of disk space we delete everything imidiatly
+        # To avoid running out of disk space we delete everything imediately
         if os.path.exists(filename + ".tar"):
             print("Delete tar file")
             os.remove(filename + ".tar")
         if os.path.exists(filename + ".folder_dummy"):
             print("Delete folder %s.folder_dummy" % filename)
             shutil.rmtree(filename + ".folder_dummy")
-        print(f"Total number of arxiv and regex DOI citations is {found_citations}.")
-        print(f"Total number of citations is {total_citations}.")
-        print(
-            f"Percentage of arxiv and regex DOI citations is {found_citations/total_citations}."
-        )
+    con.close()
+    return
+
+
+def get_metadata(citation):
+    """
+    Citation is of the form (identifier, type) where type is 'doi',
+    'said', 'faid', 'crossDOI'.
+
+    Args:
+        citation (_type_): _description_
+    """
     return
 
 
@@ -292,14 +308,14 @@ def get_citations(list_of_files):
                 # seem to be producing false positives we save the doi
                 results_doi = check_for_doi(bibitem)
                 if results_doi:
-                    citations.append([results_doi, "doi"])
+                    citations.append((results_doi[0], "doi"))
                 # TODO: rewrite this code logic when you think of something better
                 # next we do a strict arxiv id check
                 # strict arxiv is reliable and if there is a strict arxiv id then save it
                 strict_arxiv_id = check_for_arxiv_id_strict(bibitem)
                 if strict_arxiv_id and not results_doi:
                     citations.append(
-                        [strict_arxiv_id, "said"]  # said stands for strict arxiv id
+                        (strict_arxiv_id[0], "said")  # said stands for strict arxiv id
                     )
 
                 # finally do a flexible arxiv id check
@@ -307,14 +323,16 @@ def get_citations(list_of_files):
                 # so some type of doublechecking is needed
                 flexible_arxiv_id = check_for_arxiv_id_flexible(bibitem)
                 if flexible_arxiv_id and not strict_arxiv_id and not results_doi:
-                    citations.append([flexible_arxiv_id, "faid"])
+                    citations.append((flexible_arxiv_id[0], "faid"))
                 else:
                     # If all of these methods fail we need to utilize some other method
                     # Here functions utilizing other online resources will be
                     # For no we will just append an indicator to the citations list
                     if bibitem:
                         time1 = time.time()
-                        citations.append([get_crossref_doi(bibitem), "crossDOI"])
+                        crossrefDOI, score = get_crossref_doi(bibitem)
+                        if crossrefDOI:
+                            citations.append((crossrefDOI, score, "crossDOI"))
                         time2 = time.time()
                         print(
                             f"Time taken to retrieve DOI for a reference was: {time2-time1:.2f}s"
@@ -322,7 +340,7 @@ def get_citations(list_of_files):
                     else:
                         citations.append("")
 
-    print("citations = ", citations)
+    # print("citations = ", citations)
     return citations
 
 
@@ -351,18 +369,6 @@ def get_data_string(filename):
             # it still happens that we get errors here
             contents = contents.decode(encoding, "ignore")
         return contents
-
-
-def check_for_arxiv_id(citation):
-    """
-    This function returns arxiv ids using regular expressions.
-    In many cases this regular expression selects false patterns.
-    -> Can you find a better regular expression?
-    """
-    pattern = re.compile(
-        "(\d{4}.\d{4,5}|[a-z\-]+(\.[A-Z]{2})?\/\d{7})(v\d+)?", re.IGNORECASE
-    )
-    return list(set([hit[0].lower() for hit in re.findall(pattern, citation)]))
 
 
 def check_for_arxiv_id_simple(citation):
@@ -433,18 +439,21 @@ def get_crossref_doi(bibitem):
 
     One issue is that crossref will always try to match a work to a reference,
     so even if a reference doesn't exist crossref will find something.
-    """
-    cr = Crossref(mailto="matejvedak@gmail.com")  # TODO: add an email adress to get into the polite pool
-    # sample: Crossref(mailto="foo@bar.com")
 
-    # TODO: improve by querying the query.bibliographic, see
-    # https://github.com/sckott/habanero/blob/main/habanero/crossref/crossref.py
-    # and _Fieldquery within the file
+    The function returns a tuple (DOI, score) where DOI is what crossref thinks
+    the thing is and score is a measure of how confident the algorithm is in the
+    results.
+    """
+    # cr = Crossref(mailto="matejvedak@gmail.com")
+    cr = Crossref()
+
     # TODO: extract the confidence of the reference matching (score)
     # It can be accessed as follows: x['message']['items'][0]['score']
     x = cr.works(query_bibliographic=bibitem, limit=1)
-    bestItem = x["message"]["items"][0]
-    return bestItem["DOI"]
+    if x["message"]["items"]:
+        bestItem = x["message"]["items"][0]
+        return bestItem["DOI"], bestItem["score"]
+    return None, None
 
 
 build_graph()
