@@ -143,7 +143,7 @@ subset_of_papers_ids = [
 ]
 
 
-def build_graph():
+def create_database():
     """
     This function takes the arxiv ids above, downloads the files for this
     paper (get_file), and extracts the citations (get_citations)
@@ -456,4 +456,4 @@ def get_crossref_doi(bibitem):
     return None, None
 
 
-build_graph()
+create_database()
