@@ -1,4 +1,5 @@
 import gzip
+from http.client import NOT_IMPLEMENTED
 import os
 import re
 import shutil
@@ -7,8 +8,8 @@ import tarfile
 import time
 import urllib.error
 import urllib.request
-
 import chardet
+import feedparser
 
 from arxiv_regex.arxiv_regex import *
 from habanero import Crossref
@@ -159,7 +160,7 @@ def create_database():
         print("process paper %s, %d" % (paper_id, i))
         filename, list_of_files = get_file(paper_id)
         if list_of_files:
-            citations = get_citations(list_of_files)
+            citations, bibitems = get_citations(list_of_files)
             # Here we will store the citations in the database
             # citations should contain a reliable list of identifiers,
             # such as dois or arxiv_ids
@@ -294,6 +295,7 @@ def get_citations(list_of_files):
             first_bibitem = contents.find(r"\bibitem")
             bibliography_end = contents.find(r"\end{thebibliography}")
             contents = contents[first_bibitem:bibliography_end]
+
             # split by bibitem to get a list of citations
             list_of_bibitems = contents.split(r"\bibitem")
             # Filter the list of empty '' tags
@@ -301,47 +303,49 @@ def get_citations(list_of_files):
             # Strip the empty spaces
             list_of_bibitems = [item.strip() for item in list_of_bibitems]
             print(f"Found {len(list_of_bibitems)} references.")
+            
             for i, bibitem in enumerate(list_of_bibitems):
                 print(f"Processing reference number {i}.")
+
                 # for each citation check whether there is an doi tag
                 # Since DOI is a strong identifier and the regex doesn't
                 # seem to be producing false positives we save the doi
                 results_doi = check_for_doi(bibitem)
                 if results_doi:
-                    citations.append((results_doi[0], "doi"))
+                    if check_doi_registration_agency(results_doi) == 'Crossref':
+                        md = crossref_API_query_doi(results_doi)
+                    else:
+                        md = None
+                    citations.append(md)
+
                 # TODO: rewrite this code logic when you think of something better
                 # next we do a strict arxiv id check
                 # strict arxiv is reliable and if there is a strict arxiv id then save it
                 strict_arxiv_id = check_for_arxiv_id_strict(bibitem)
                 if strict_arxiv_id and not results_doi:
-                    citations.append(
-                        (strict_arxiv_id[0], "said")  # said stands for strict arxiv id
-                    )
+                    md = get_metadata_arxiv_query(strict_arxiv_id)
+                    citations.append(md)
 
                 # finally do a flexible arxiv id check
                 # this one might catch quite a few false positives
                 # so some type of doublechecking is needed
                 flexible_arxiv_id = check_for_arxiv_id_flexible(bibitem)
                 if flexible_arxiv_id and not strict_arxiv_id and not results_doi:
-                    citations.append((flexible_arxiv_id[0], "faid"))
+                    md = get_metadata_arxiv_query(flexible_arxiv_id)
+                    citations.append(md)
                 else:
                     # If all of these methods fail we need to utilize some other method
-                    # Here functions utilizing other online resources will be
-                    # For no we will just append an indicator to the citations list
-                    if bibitem:
-                        time1 = time.time()
-                        crossrefDOI, score = get_crossref_doi(bibitem)
-                        if crossrefDOI:
-                            citations.append((crossrefDOI, score, "crossDOI"))
-                        time2 = time.time()
-                        print(
-                            f"Time taken to retrieve DOI for a reference was: {time2-time1:.2f}s"
-                        )
-                    else:
-                        citations.append("")
+                    # We use crossref and their reference matching system
+                    # See https://www.crossref.org/categories/reference-matching/#:~:text=Matching%20(or%20resolving)%20bibliographic%20references,indexes%2C%20impact%20factors%2C%20etc.
+                    time1 = time.time()
+                    md = get_crossref_metadata_from_query(bibitem)
+                    citations.append(md)
+                    time2 = time.time()
+                    print(
+                        f"Time taken to retrieve DOI for a reference was: {time2-time1:.2f}s"
+                    )
 
-    # print("citations = ", citations)
-    return citations
+    return citations, list_of_bibitems
 
 
 def get_data_string(filename):
@@ -370,16 +374,6 @@ def get_data_string(filename):
             contents = contents.decode(encoding, "ignore")
         return contents
 
-
-def check_for_arxiv_id_simple(citation):
-    """
-    Simple arxiv id checking using regex
-    """
-    return list(
-        set([hit[0].lower() for hit in re.findall(REGEX_ARXIV_SIMPLE, citation)])
-    )
-
-
 def check_for_arxiv_id_strict(citation):
     """
     Strict regex for finding arxiv ids. This will essentially only match if the
@@ -396,7 +390,7 @@ def check_for_arxiv_id_strict(citation):
         for group in hit:
             if group:
                 hits.append(group.lower())
-    return list(set(hits))
+    return list(set(hits))[0]
 
 
 def check_for_arxiv_id_flexible(citation):
@@ -415,7 +409,42 @@ def check_for_arxiv_id_flexible(citation):
         for group in hit:
             if group:
                 hits.append(group.lower())
-    return list(set(hits))
+    return list(set(hits))[0]
+
+
+def get_metadata_arxiv_query(arxivID):
+    OF_INTEREST = ["id", "title", "authors", "link", "published",
+                    "summary", "arxiv_comment", "arxiv_primaty_category",
+                    ]
+
+    base_url = "http://export.arxiv.org/api/query?"
+
+    query = "id_list=%s" %arxivID
+
+    with urllib.request.urlopen(base_url + query) as url:
+        response = url.read()
+
+    feed = feedparser.parse(response)
+    entry = feed.entries[0]
+
+    metadata = {}
+    metadata["arxiv id"] = entry.id.split("/abs/")[-1]
+    metadata["title"] = entry["title"]
+    metadata["authors"] = entry["authors"]
+    for link in entry.links:
+        if link.rel == "alternate":
+            metadata["URL"] = link.href
+    metadata["published"] = entry["published"]
+    metadata["summary"] = entry["summary"]
+
+    try:
+        metadata["arxiv_comment"] = entry["arxiv_comment"]
+    except KeyError:
+        metadata["arxiv_comment"] = ""
+
+    metadata["arxiv_primary_category"] = entry["arxiv_primary_category"]
+    
+    return metadata
 
 
 def check_for_doi(citation):
@@ -427,10 +456,59 @@ def check_for_doi(citation):
     https://www.crossref.org/blog/dois-and-matching-regular-expressions/
     """
     pattern = re.compile("10.\\d{4,9}/[-._;()/:a-z0-9A-Z]+", re.IGNORECASE)
-    return list(set(re.findall(pattern, citation)))
+    return list(set(re.findall(pattern, citation)))[0]
 
+    
+def check_doi_registration_agency(doi):
+    """
+    This function takes a DOI and queries crossref to check where the doi
+    is registered. If it is registered at crossref we can get metadata from
+    crossref. If it isn't registered with crossref some other methods will
+    have to be utilized.
+    Args:
+        doi (_type_): _description_
+    """
+    cr = Crossref()
+    return cr.registration_agency(doi)[0]
 
-def get_crossref_doi(bibitem):
+def crossref_API_query_doi(doi):
+    """_summary_
+    dict_keys(['indexed', 'reference-count', 'publisher', 'license', 
+    'content-domain', 'short-container-title', 'published-print', 'DOI', 
+    'type', 'created', 'page', 'source', 'is-referenced-by-count', 'title', 
+    'prefix', 'author', 'member', 'reference', 'container-title', 
+    'original-title', 'link', 'deposited', 'score', 'resource', 'subtitle', 
+    'short-title', 'issued', 'references-count', 'URL', 'relation', 'ISSN', 
+    'issn-type', 'published'])  
+    Args:
+        doi (_type_): _description_
+    """
+    OF_INTEREST = ["DOI", "title", "author", "URL"]
+    cr = Crossref()
+    work = cr.works(ids=doi)
+    metadata = {}
+    metadata["DOI"] = work["message"]["DOI"]
+    try:
+        metadata["title"] = work["message"]["title"][0] # Need [0] because for some reason the title comes back in a list
+    except IndexError:
+        pass
+
+    try:
+        authors = work["message"]["author"]
+        metadata["authors"] = [{"name":author["given"] + ' ' + author["family"]} for author in authors]
+    except KeyError:
+        pass
+    metadata["URL"] = work["message"]["URL"]
+    metadata["published"] = work["message"]["published"]["date-parts"][0][0]
+    metadata["type"] = work["message"]["type"]
+    try:
+            metadata["container"] = work["message"]["container-title"][0]
+    except KeyError:
+            metadata["container"] = ""
+    
+    return metadata
+
+def get_crossref_metadata_from_query(bibitem):
     """
     This is function that utilizes the habanero module to communicate with the
     crossref API. Given bibitem is processed on the crossref servers which try
@@ -440,20 +518,47 @@ def get_crossref_doi(bibitem):
     One issue is that crossref will always try to match a work to a reference,
     so even if a reference doesn't exist crossref will find something.
 
-    The function returns a tuple (DOI, score) where DOI is what crossref thinks
-    the thing is and score is a measure of how confident the algorithm is in the
-    results.
+    dict_keys(['indexed', 'reference-count', 'publisher', 'license', 
+    'content-domain', 'short-container-title', 'published-print', 'DOI', 
+    'type', 'created', 'page', 'source', 'is-referenced-by-count', 'title', 
+    'prefix', 'author', 'member', 'reference', 'container-title', 
+    'original-title', 'link', 'deposited', 'score', 'resource', 'subtitle', 
+    'short-title', 'issued', 'references-count', 'URL', 'relation', 'ISSN', 
+    'issn-type', 'published'])
     """
+    OF_INTEREST = ["DOI", "title", "author", "URL", "published", "type", "container", "score"]
+
     # cr = Crossref(mailto="matejvedak@gmail.com")
     cr = Crossref()
 
-    # TODO: extract the confidence of the reference matching (score)
-    # It can be accessed as follows: x['message']['items'][0]['score']
     x = cr.works(query_bibliographic=bibitem, limit=1)
     if x["message"]["items"]:
         bestItem = x["message"]["items"][0]
-        return bestItem["DOI"], bestItem["score"]
-    return None, None
+        
+        metadata = {}
+        metadata["DOI"] = bestItem["DOI"]
+        try:
+            metadata["title"] = bestItem["title"][0]
+        except KeyError:
+            metadata["title"] = ""
+        
+        try:
+            authors = bestItem["author"]
+            metadata["authors"] = [{"name":author["given"] + ' ' + author["family"]} for author in authors]
+        except KeyError:
+            metadata["authors"] = ""
+        metadata["URL"] = bestItem["URL"]
+        metadata["published"] = bestItem["published"]["date-parts"][0][0]
+        metadata["type"] = bestItem["type"]
+        try:
+            metadata["container"] = bestItem["container-title"][0]
+        except KeyError:
+            metadata["container"] = ""
 
+        metadata["score"] = bestItem["score"]
 
-create_database()
+    return metadata
+
+print(check_doi_registration_agency("10.1109/TAC.2018.2876389"))
+#print(get_metadata_arxiv_query("1903.03180"))
+#print(get_crossref_metadata("Wooldridge, J. M. (2009). On estimating firm-level production functions using proxy variables to control for unobservables. Economics Letters, 104(3):112–114."))
