@@ -92,7 +92,7 @@ RE_CATEGORIES = r'(?:{})(?:(?:[.][A-Z]{{2}})|(?:{}))?'.format(
 # valid YYMM date, NOT preceded by any digits
 # NOTE: at the date of writing, it is 2019, so we do not allow
 # proper dates for YY 20 or larger
-RE_DATE = r'(?:(?:[0-1][0-9])|(?:9[1-9]))(?:0[1-9]|1[0-2])'
+RE_DATE = r'(?:(?:[0-2][0-9])|(?:9[1-9]))(?:0[1-9]|1[0-2])'
 RE_VERSION = r'(?:[vV][1-9]\d*)?'
 
 # =============================================================================
@@ -203,6 +203,8 @@ TEST_POSITIVE = [
 TEST_NEGATIVE = [
     'doi: 10.1145/ 321105.321114 ',
     'doi: 10.1145/ 1105.321114 ',
+    'arXiv:math.PR/0003156',
+    'arXiv:2203.00021'
 ]
 
-# print([hit for hit in re.findall(REGEX_ARXIV_STRICT, ' '.join(TEST_POSITIVE))])
+print([hit for hit in re.findall(REGEX_ARXIV_STRICT, ' '.join(TEST_NEGATIVE))])
