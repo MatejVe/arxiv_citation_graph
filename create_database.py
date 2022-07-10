@@ -389,27 +389,27 @@ def get_citations(list_of_files):
                     print(f'Found a DOI.')
                     try:  # In come cases the extracted DOI is faulty and will return an error
                         if check_doi_registration_agency(results_doi) == "Crossref":
-                            md = crossref_API_query_doi(results_doi)
+                            md = crossref_metadata_from_doi(results_doi)
                     except:
                         print(f"DOI couldn't be resolved, querying CrossRef.")
-                        md = get_crossref_metadata_from_query(bibitem)
+                        md = crossref_metadata_from_query(bibitem)
                     citations.append(md)
                 elif strict_arxiv_id:
                     strict_arxiv_id = strict_arxiv_id[0]
                     print(f'Found an arXiv ID (strict) {strict_arxiv_id}.')
-                    md = get_metadata_arxiv_query(strict_arxiv_id)
+                    md = arxiv_metadata_from_id(strict_arxiv_id)
                     citations.append(md)
                 elif flexible_arxiv_id:
                     flexible_arxiv_id = flexible_arxiv_id[0]
                     print(f'Found an arXiv ID (flexible) {flexible_arxiv_id}.')
-                    md = get_metadata_arxiv_query(flexible_arxiv_id)
+                    md = arxiv_metadata_from_id(flexible_arxiv_id)
                     citations.append(md)
                 else:
                     # If all of these methods fail we need to utilize some other method
                     # We use crossref and their reference matching system
                     # See https://www.crossref.org/categories/reference-matching/#:~:text=Matching%20(or%20resolving)%20bibliographic%20references,indexes%2C%20impact%20factors%2C%20etc.
                     time1 = time.time()
-                    md = get_crossref_metadata_from_query(bibitem)
+                    md = crossref_metadata_from_query(bibitem)
                     citations.append(md)
                     time2 = time.time()
                     print(
@@ -484,9 +484,9 @@ def check_for_arxiv_id_flexible(citation):
     return list(set(hits))
 
 
-def get_metadata_arxiv_query(arxivID):
+def arxiv_metadata_from_id(arxivID):
     OF_INTEREST = [
-        "id",
+        "arxiv_id",
         "title",
         "authors",
         "link",
@@ -495,6 +495,7 @@ def get_metadata_arxiv_query(arxivID):
         "arxiv_comment",
         "arxiv_primaty_category",
     ]
+    SIMPLE_EXTRACT = ["title", "published", "summary", "arxiv_comment", "arxiv_primary_category"]
 
     base_url = "http://export.arxiv.org/api/query?"
 
@@ -506,22 +507,31 @@ def get_metadata_arxiv_query(arxivID):
     entry = feed.entries[0]
 
     metadata = {}
-    metadata["arxiv id"] = entry.id.split("/abs/")[-1]
-    metadata["title"] = entry["title"]
-    authors = entry["authors"]
-    metadata["authors"] = ", ".join([author["name"] for author in authors])
-    for link in entry.links:
-        if link.rel == "alternate":
-            metadata["URL"] = link.href
-    metadata["published"] = entry["published"]
-    metadata["summary"] = entry["summary"]
+    # Extract the simple entries
+    for item in SIMPLE_EXTRACT:
+        try:
+            metadata[item] = entry[item]
+        except KeyError:
+            metadata[item] = "null"
+    
+    # Extract entries that require some postprocessing
+    try:
+        metadata["arxiv id"] = entry.id.split("/abs/")[-1]
+    except KeyError:
+        metadata["arxiv id"] = "null"
 
     try:
-        metadata["arxiv_comment"] = entry["arxiv_comment"]
+        authors = entry["authors"]
+        metadata["authors"] = ", ".join([author["name"] for author in authors])
     except KeyError:
-        metadata["arxiv_comment"] = "null"
-
-    metadata["arxiv_primary_category"] = entry["arxiv_primary_category"]
+        metadata["authors"] = "null"
+    
+    try:
+        for link in entry.links:
+            if link.rel == "alternate":
+                metadata["URL"] = link.href
+    except KeyError:
+        metadata["URL"] = "null"
 
     return metadata
 
@@ -551,7 +561,7 @@ def check_doi_registration_agency(doi):
     return cr.registration_agency(doi)[0]
 
 
-def crossref_API_query_doi(doi):
+def crossref_metadata_from_doi(doi):
     """_summary_
     dict_keys(['indexed', 'reference-count', 'publisher', 'license',
     'content-domain', 'short-container-title', 'published-print', 'DOI',
@@ -563,37 +573,47 @@ def crossref_API_query_doi(doi):
     Args:
         doi (_type_): _description_
     """
-    OF_INTEREST = ["DOI", "title", "author", "URL"]
+    OF_INTEREST = ["DOI", "title", "author", "URL", "published", "type", "container"]
+    SIMPLE_EXTRACT = ["DOI", "URL", "type"]
     cr = Crossref()
-    work = cr.works(ids=doi)
+    work = cr.works(ids=doi)["message"]
     metadata = {}
-    metadata["DOI"] = work["message"]["DOI"]
+    # Extract simple entries
+    for item in SIMPLE_EXTRACT:
+        try:
+            metadata[item] = work[item]
+        except KeyError:
+            metadata[item] = "null"
+    
+    # Extract entries that require some postprocessing
     try:
-        metadata["title"] = work["message"]["title"][
-            0
-        ]  # Need [0] because for some reason the title comes back in a list
+        # Need [0] because for some reason the title comes back in a list
+        metadata["title"] = work["title"][0]
     except IndexError:
-        pass
+        metadata["title"] = "null"
 
     try:
-        authors = work["message"]["author"]
+        authors = work["author"]
         metadata["authors"] = ", ".join(
             [author["given"] + " " + author["family"] for author in authors]
         )
     except KeyError:
-        pass
-    metadata["URL"] = work["message"]["URL"]
-    metadata["published"] = work["message"]["published"]["date-parts"][0][0]
-    metadata["type"] = work["message"]["type"]
+        metadata["authors"] = "null"
+
     try:
-        metadata["container"] = work["message"]["container-title"][0]
+        metadata["published"] = work["published"]["date-parts"][0][0]
+    except KeyError:
+        metadata["published"] = "null"
+
+    try:
+        metadata["container"] = work["container-title"][0]
     except KeyError:
         metadata["container"] = "null"
 
     return metadata
 
 
-def get_crossref_metadata_from_query(bibitem):
+def crossref_metadata_from_query(bibitem):
     """
     This is function that utilizes the habanero module to communicate with the
     crossref API. Given bibitem is processed on the crossref servers which try
@@ -614,13 +634,14 @@ def get_crossref_metadata_from_query(bibitem):
     OF_INTEREST = [
         "DOI",
         "title",
-        "author",
+        "authors",
         "URL",
         "published",
         "type",
         "container",
         "score",
     ]
+    SIMPLE_EXTRACT = ["DOI", "URL", "type", "score"]
 
     # cr = Crossref(mailto="matejvedak@gmail.com")
     cr = Crossref()
@@ -630,7 +651,14 @@ def get_crossref_metadata_from_query(bibitem):
         bestItem = x["message"]["items"][0]
 
         metadata = {}
-        metadata["DOI"] = bestItem["DOI"]
+        # Extract the simple items
+        for item in SIMPLE_EXTRACT:
+            try:
+                metadata[item] = bestItem[item]
+            except:
+                metadata[item] = "null"
+
+        # Extract the items that require postprocessing
         try:
             metadata["title"] = bestItem["title"][0]
         except KeyError:
@@ -644,30 +672,27 @@ def get_crossref_metadata_from_query(bibitem):
         except KeyError:
             metadata["authors"] = "null"
 
-        metadata["URL"] = bestItem["URL"]
-
         try:
             metadata["published"] = bestItem["published"]["date-parts"][0][0]
         except KeyError:
             metadata["published"] = "null"
 
-        metadata["type"] = bestItem["type"]
         try:
             metadata["container"] = bestItem["container-title"][0]
         except KeyError:
             metadata["container"] = "null"
-
-        metadata["score"] = bestItem["score"]
+    else:
+        metadata = {item:"null" for item in OF_INTEREST}
 
     return metadata
 
 
 create_database()
 # print(check_doi_registration_agency("10.1109/TAC.2018.2876389"))
-# print(crossref_API_query_doi("10.1109/TAC.2018.2876389"))
-# print(get_metadata_arxiv_query("1903.03180"))
+# print(crossref_metadata_from_doi("10.1109/TAC.2018.2876389"))
+# print(arxiv_metadata_from_id("1903.03180"))
 # print(
-#    get_crossref_metadata_from_query(
+#    crossref_metadata_from_query(
 #        "Wooldridge, J. M. (2009). On estimating firm-level production functions using proxy variables to control for unobservables. Economics Letters, 104(3):112–114."
 #    )
 # )
