@@ -129,6 +129,7 @@ subset_of_papers_ids = [
     "1901.00305",
 ]
 
+test_paper = ["math-ph/0303034"]
 
 def create_database():
     """
@@ -162,6 +163,9 @@ def create_database():
     Crossref specific:
         DOI, type, container, score
     """
+    COMMON_FIELDS = ["title", "author", "URL", "published"]
+    ARXIV_FIELDS = ["arxiv_id", "summary", "arxiv_comment", "arxiv_primary_category"]
+    CROSSREF_FIELDS = ["DOI", "type", "container", "score"]
     con = sqlite3.connect("test.db")
     cur = con.cursor()
     cur.execute(
@@ -395,12 +399,12 @@ def get_citations(list_of_files):
                         md = crossref_metadata_from_query(bibitem)
                     citations.append(md)
                 elif strict_arxiv_id:
-                    strict_arxiv_id = strict_arxiv_id[0]
+                    strict_arxiv_id = clean_arxiv_id(strict_arxiv_id[0])
                     print(f'Found an arXiv ID (strict) {strict_arxiv_id}.')
                     md = arxiv_metadata_from_id(strict_arxiv_id)
                     citations.append(md)
                 elif flexible_arxiv_id:
-                    flexible_arxiv_id = flexible_arxiv_id[0]
+                    flexible_arxiv_id = clean_arxiv_id(flexible_arxiv_id[0])
                     print(f'Found an arXiv ID (flexible) {flexible_arxiv_id}.')
                     md = arxiv_metadata_from_id(flexible_arxiv_id)
                     citations.append(md)
@@ -413,7 +417,7 @@ def get_citations(list_of_files):
                     citations.append(md)
                     time2 = time.time()
                     print(
-                        f"Resorted to CrossRef, time taken to retrieve DOI: {time2-time1:.2f}s"
+                        f"Resorted to CrossRef, time taken to retrieve metadata: {time2-time1:.2f}s"
                     )
 
     return citations, bibitems
@@ -483,6 +487,18 @@ def check_for_arxiv_id_flexible(citation):
                 hits.append(group.lower())
     return list(set(hits))
 
+def clean_arxiv_id(id):
+    """
+    Some references contain faulty arxiv ids. Example: arXiv:math.PR/0003156
+    '.PR' part breaks the lookup function. Subcategories can't be appended
+    to a category. This function cleans that up.
+    """
+    if '/' in id:
+        cat, num = id.split('/')
+        if '.' in cat:
+           cat = cat.split('.')[0]
+        return cat + '/' + num
+    return id
 
 def arxiv_metadata_from_id(arxivID):
     OF_INTEREST = [
@@ -495,7 +511,7 @@ def arxiv_metadata_from_id(arxivID):
         "arxiv_comment",
         "arxiv_primaty_category",
     ]
-    SIMPLE_EXTRACT = ["title", "published", "summary", "arxiv_comment", "arxiv_primary_category"]
+    SIMPLE_EXTRACT = ["title", "published", "summary", "arxiv_comment"]
 
     base_url = "http://export.arxiv.org/api/query?"
 
@@ -516,9 +532,9 @@ def arxiv_metadata_from_id(arxivID):
     
     # Extract entries that require some postprocessing
     try:
-        metadata["arxiv id"] = entry.id.split("/abs/")[-1]
+        metadata["arxiv_id"] = entry.id.split("/abs/")[-1]
     except KeyError:
-        metadata["arxiv id"] = "null"
+        metadata["arxiv_id"] = "null"
 
     try:
         authors = entry["authors"]
@@ -532,6 +548,11 @@ def arxiv_metadata_from_id(arxivID):
                 metadata["URL"] = link.href
     except KeyError:
         metadata["URL"] = "null"
+
+    try:
+        metadata["arxiv_primary_category"] = entry["arxiv_primary_category"]["term"]
+    except KeyError:
+        metadata["arxiv_primary_category"] = "null"
 
     return metadata
 
