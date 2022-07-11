@@ -1,5 +1,4 @@
 import gzip
-from http.client import NOT_IMPLEMENTED
 import os
 import re
 import shutil
@@ -136,6 +135,7 @@ def create_database():
     This function takes the arxiv ids above, downloads the files for this
     paper (get_file), and extracts the citations (get_citations)
 
+    Depending on what the id is returned metadata is different.
     Arxiv metadata:
         arxiv_id
         title
@@ -177,13 +177,14 @@ def create_database():
                 title, 
                 authors, 
                 URL, 
-                publised,
+                published,
                 summary,
                 arxiv_comment,
                 arxiv_primary_category,
                 type,
                 container,
                 score,
+                length_of_bibitem,
                 bibitem
                 )"""
     )
@@ -229,7 +230,7 @@ def create_database():
                     arxiv_category = "null"
 
                 cur.execute(
-                    "INSERT INTO reference_tree VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO reference_tree VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         paper_id,
                         i,
@@ -245,6 +246,7 @@ def create_database():
                         item_type,
                         container,
                         score,
+                        len(bibitems[i]),
                         bibitems[i],
                     ),
                 )  # tip is Croatian for type, can't use type since it is a reserved keyword
@@ -289,7 +291,7 @@ def get_file(paper_id):
 
 def retrieve_rawdata(url):
     """
-    This function gets the data from arxiv and returns the
+    This function gets the data from a web location and returns the
     raw data
     """
     retries = 0
@@ -456,6 +458,12 @@ def check_for_arxiv_id_strict(citation):
     format of the arxiv id is exactly as specified https://arxiv.org/help/arxiv_identifier
     Seems to have no false positives but on the other hand it doesn't detect a lot of
     arxiv ids
+
+    Args:
+        citation (str): a full bibtex entry of the citation
+    
+    Returns:
+        list of strings: each field corresponds to a group hit in the defined regex
     """
     raw_hits = re.findall(REGEX_ARXIV_STRICT, citation)
     # every hit is a tuple whose entries correspond to the regex groups of the expression
@@ -475,6 +483,12 @@ def check_for_arxiv_id_flexible(citation):
     this regex essentially accepts anything that looks like an arxiv id and has
     the slightest smell of being one as well. that is, if it is an id and
     mentions anything about the arxiv before hand, then it is an id.
+
+    Args:
+        citation (str): a full bibtex entry of the citation
+    
+    Returns:
+        list of strings: each field corresponds to a group hit in the defined regex
     """
     raw_hits = re.findall(REGEX_ARXIV_FLEXIBLE, citation)
     # every hit is a tuple whose entries correspond to the regex groups of the expression
@@ -492,6 +506,12 @@ def clean_arxiv_id(id):
     Some references contain faulty arxiv ids. Example: arXiv:math.PR/0003156
     '.PR' part breaks the lookup function. Subcategories can't be appended
     to a category. This function cleans that up.
+
+    Args:
+        id (str): arxiv id that might contain faulty fields
+    
+    Returns:
+        str: cleaned up arxiv id
     """
     if '/' in id:
         cat, num = id.split('/')
@@ -501,6 +521,28 @@ def clean_arxiv_id(id):
     return id
 
 def arxiv_metadata_from_id(arxivID):
+    """
+    Provided a valid arxivID this function will query the arxiv API
+    and parse the response. The function returns a dictionary with
+    the items of interest.
+
+    Metadata that we are currently interested in:
+        arxiv_id,
+        title,
+        authors,
+        link,
+        published,
+        summary,
+        arxiv_comment,
+        arxiv_primary_category
+
+    Args:
+        arxivID (str): a valid arXiv ID
+
+    Returns:
+        dict: a dictionary with keys being the fields we are
+                interested in above
+    """
     OF_INTEREST = [
         "arxiv_id",
         "title",
@@ -509,7 +551,7 @@ def arxiv_metadata_from_id(arxivID):
         "published",
         "summary",
         "arxiv_comment",
-        "arxiv_primaty_category",
+        "arxiv_primary_category",
     ]
     SIMPLE_EXTRACT = ["title", "published", "summary", "arxiv_comment"]
 
@@ -564,6 +606,13 @@ def check_for_doi(citation):
     Note that while this regular expression matches most dois, it does not match
     all of them. For more details see
     https://www.crossref.org/blog/dois-and-matching-regular-expressions/
+
+    Args:
+        citation (str): string that is the full citation,
+                        usually a full bibtex item
+
+    Returns:
+        list: a list of strings of unique matches
     """
     pattern = re.compile("10.\\d{4,9}/[-._;()/:a-z0-9A-Z]+", re.IGNORECASE)
     return list(set(re.findall(pattern, citation)))
@@ -575,24 +624,47 @@ def check_doi_registration_agency(doi):
     is registered. If it is registered at crossref we can get metadata from
     crossref. If it isn't registered with crossref some other methods will
     have to be utilized.
+
     Args:
-        doi (_type_): _description_
+        doi (str): a valid DOI identifier
+
+    Returns:
+        str: registration agency the DOI is registered with
     """
     cr = Crossref()
     return cr.registration_agency(doi)[0]
 
 
 def crossref_metadata_from_doi(doi):
-    """_summary_
-    dict_keys(['indexed', 'reference-count', 'publisher', 'license',
+    """
+    Provided a valid doi this function will query the CrossRef API 
+    and parse the returned metadata. The function returns a dictionary
+    with the items of interest.
+
+    Metadata we are interested in:
+        DOI
+        title
+        author
+        URL
+        published
+        type
+        container
+
+    Full list of possible categories:
+    ['indexed', 'reference-count', 'publisher', 'license',
     'content-domain', 'short-container-title', 'published-print', 'DOI',
     'type', 'created', 'page', 'source', 'is-referenced-by-count', 'title',
     'prefix', 'author', 'member', 'reference', 'container-title',
     'original-title', 'link', 'deposited', 'score', 'resource', 'subtitle',
     'short-title', 'issued', 'references-count', 'URL', 'relation', 'ISSN',
-    'issn-type', 'published'])
+    'issn-type', 'published']
+
     Args:
-        doi (_type_): _description_
+        doi (str): a valid DOI identifier
+
+    Returns:
+        dict: a dictionary with keys that correspond to fields we are interested in
+                above
     """
     OF_INTEREST = ["DOI", "title", "author", "URL", "published", "type", "container"]
     SIMPLE_EXTRACT = ["DOI", "URL", "type"]
@@ -644,13 +716,33 @@ def crossref_metadata_from_query(bibitem):
     One issue is that crossref will always try to match a work to a reference,
     so even if a reference doesn't exist crossref will find something.
 
-    dict_keys(['indexed', 'reference-count', 'publisher', 'license',
+    The function returns a dictionary with the items we are interested in.
+
+    Fields we are interested in:
+        DOI,
+        title,
+        authors,
+        URL,
+        published,
+        type,
+        container,
+        score
+
+    Full list of available fields:
+    ['indexed', 'reference-count', 'publisher', 'license',
     'content-domain', 'short-container-title', 'published-print', 'DOI',
     'type', 'created', 'page', 'source', 'is-referenced-by-count', 'title',
     'prefix', 'author', 'member', 'reference', 'container-title',
     'original-title', 'link', 'deposited', 'score', 'resource', 'subtitle',
     'short-title', 'issued', 'references-count', 'URL', 'relation', 'ISSN',
-    'issn-type', 'published'])
+    'issn-type', 'published']
+
+    Args:
+        bibitem (str): full bibtex entry of the wanted reference
+
+    Returns:
+        dict: a dictionary with keys that correspond to fields we are interested in
+                above
     """
     OF_INTEREST = [
         "DOI",
@@ -708,7 +800,11 @@ def crossref_metadata_from_query(bibitem):
     return metadata
 
 
+time1 = time.time()
 create_database()
+time2 = time.time()
+print(f'It took me {time2-time1:.2f}s to process a 100 papers.')
+
 # print(check_doi_registration_agency("10.1109/TAC.2018.2876389"))
 # print(crossref_metadata_from_doi("10.1109/TAC.2018.2876389"))
 # print(arxiv_metadata_from_id("1903.03180"))
