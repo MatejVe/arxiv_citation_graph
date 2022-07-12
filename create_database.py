@@ -130,6 +130,7 @@ subset_of_papers_ids = [
 
 test_paper = ["math-ph/0303034"]
 
+
 def create_database():
     """
     This function takes the arxiv ids above, downloads the files for this
@@ -356,7 +357,7 @@ def get_citations(list_of_files):
     citations = []
     bibitems = []
     for filename in list_of_files:
-        print(f'Looking into {filename}.')
+        print(f"Looking into {filename}.")
         contents = get_data_string(filename)
         # Check whether we have citation information in this file
         if contents.find(r"\bibitem") > -1:
@@ -392,7 +393,7 @@ def get_citations(list_of_files):
                 if results_doi:
                     # for some reason it comes back in a list
                     results_doi = results_doi[0]
-                    print(f'Found a DOI.')
+                    print(f"Found a DOI.")
                     try:  # In come cases the extracted DOI is faulty and will return an error
                         if check_doi_registration_agency(results_doi) == "Crossref":
                             md = crossref_metadata_from_doi(results_doi)
@@ -402,12 +403,12 @@ def get_citations(list_of_files):
                     citations.append(md)
                 elif strict_arxiv_id:
                     strict_arxiv_id = clean_arxiv_id(strict_arxiv_id[0])
-                    print(f'Found an arXiv ID (strict) {strict_arxiv_id}.')
+                    print(f"Found an arXiv ID (strict) {strict_arxiv_id}.")
                     md = arxiv_metadata_from_id(strict_arxiv_id)
                     citations.append(md)
                 elif flexible_arxiv_id:
                     flexible_arxiv_id = clean_arxiv_id(flexible_arxiv_id[0])
-                    print(f'Found an arXiv ID (flexible) {flexible_arxiv_id}.')
+                    print(f"Found an arXiv ID (flexible) {flexible_arxiv_id}.")
                     md = arxiv_metadata_from_id(flexible_arxiv_id)
                     citations.append(md)
                 else:
@@ -452,7 +453,7 @@ def get_data_string(filename):
         return contents
 
 
-def check_for_arxiv_id_strict(citation):
+def check_for_arxiv_id_strict(citation: str) -> list[str]:
     """
     Strict regex for finding arxiv ids. This will essentially only match if the
     format of the arxiv id is exactly as specified https://arxiv.org/help/arxiv_identifier
@@ -461,7 +462,7 @@ def check_for_arxiv_id_strict(citation):
 
     Args:
         citation (str): a full bibtex entry of the citation
-    
+
     Returns:
         list of strings: each field corresponds to a group hit in the defined regex
     """
@@ -477,7 +478,7 @@ def check_for_arxiv_id_strict(citation):
     return list(set(hits))
 
 
-def check_for_arxiv_id_flexible(citation):
+def check_for_arxiv_id_flexible(citation: str) -> list[str]:
     """
     Flexible regex for finding arxiv ids. As specified in the arxiv_regex.py:
     this regex essentially accepts anything that looks like an arxiv id and has
@@ -486,7 +487,7 @@ def check_for_arxiv_id_flexible(citation):
 
     Args:
         citation (str): a full bibtex entry of the citation
-    
+
     Returns:
         list of strings: each field corresponds to a group hit in the defined regex
     """
@@ -501,7 +502,8 @@ def check_for_arxiv_id_flexible(citation):
                 hits.append(group.lower())
     return list(set(hits))
 
-def clean_arxiv_id(id):
+
+def clean_arxiv_id(id: str) -> str:
     """
     Some references contain faulty arxiv ids. Example: arXiv:math.PR/0003156
     '.PR' part breaks the lookup function. Subcategories can't be appended
@@ -509,18 +511,19 @@ def clean_arxiv_id(id):
 
     Args:
         id (str): arxiv id that might contain faulty fields
-    
+
     Returns:
         str: cleaned up arxiv id
     """
-    if '/' in id:
-        cat, num = id.split('/')
-        if '.' in cat:
-           cat = cat.split('.')[0]
-        return cat + '/' + num
+    if "/" in id:
+        cat, num = id.split("/")
+        if "." in cat:
+            cat = cat.split(".")[0]
+        return cat + "/" + num
     return id
 
-def arxiv_metadata_from_id(arxivID):
+
+def arxiv_metadata_from_id(arxivID: str) -> dict:
     """
     Provided a valid arxivID this function will query the arxiv API
     and parse the response. The function returns a dictionary with
@@ -553,7 +556,7 @@ def arxiv_metadata_from_id(arxivID):
         "arxiv_comment",
         "arxiv_primary_category",
     ]
-    SIMPLE_EXTRACT = ["title", "published", "summary", "arxiv_comment"]
+    SIMPLE_EXTRACT = ["title", "summary", "arxiv_comment"]
 
     base_url = "http://export.arxiv.org/api/query?"
 
@@ -571,7 +574,7 @@ def arxiv_metadata_from_id(arxivID):
             metadata[item] = entry[item]
         except KeyError:
             metadata[item] = "null"
-    
+
     # Extract entries that require some postprocessing
     try:
         metadata["arxiv_id"] = entry.id.split("/abs/")[-1]
@@ -579,11 +582,16 @@ def arxiv_metadata_from_id(arxivID):
         metadata["arxiv_id"] = "null"
 
     try:
+        metadata["published"] = entry["published"].split("-")[0]
+    except:
+        metadata["published"] = "null"
+
+    try:
         authors = entry["authors"]
         metadata["authors"] = ", ".join([author["name"] for author in authors])
     except KeyError:
         metadata["authors"] = "null"
-    
+
     try:
         for link in entry.links:
             if link.rel == "alternate":
@@ -599,7 +607,7 @@ def arxiv_metadata_from_id(arxivID):
     return metadata
 
 
-def check_for_doi(citation):
+def check_for_doi(citation: str) -> list[str]:
     """
     This function returns dois using regular expressions. So far I haven't seen
     false positive with this selection.
@@ -618,7 +626,7 @@ def check_for_doi(citation):
     return list(set(re.findall(pattern, citation)))
 
 
-def check_doi_registration_agency(doi):
+def check_doi_registration_agency(doi: str) -> str:
     """
     This function takes a DOI and queries crossref to check where the doi
     is registered. If it is registered at crossref we can get metadata from
@@ -635,9 +643,9 @@ def check_doi_registration_agency(doi):
     return cr.registration_agency(doi)[0]
 
 
-def crossref_metadata_from_doi(doi):
+def crossref_metadata_from_doi(doi: str) -> dict:
     """
-    Provided a valid doi this function will query the CrossRef API 
+    Provided a valid doi this function will query the CrossRef API
     and parse the returned metadata. The function returns a dictionary
     with the items of interest.
 
@@ -668,7 +676,7 @@ def crossref_metadata_from_doi(doi):
     """
     OF_INTEREST = ["DOI", "title", "author", "URL", "published", "type", "container"]
     SIMPLE_EXTRACT = ["DOI", "URL", "type"]
-    cr = Crossref()
+    cr = Crossref(mailto="matejvedak@gmail.com")
     work = cr.works(ids=doi)["message"]
     metadata = {}
     # Extract simple entries
@@ -677,7 +685,7 @@ def crossref_metadata_from_doi(doi):
             metadata[item] = work[item]
         except KeyError:
             metadata[item] = "null"
-    
+
     # Extract entries that require some postprocessing
     try:
         # Need [0] because for some reason the title comes back in a list
@@ -706,7 +714,7 @@ def crossref_metadata_from_doi(doi):
     return metadata
 
 
-def crossref_metadata_from_query(bibitem):
+def crossref_metadata_from_query(bibitem: str) -> dict:
     """
     This is function that utilizes the habanero module to communicate with the
     crossref API. Given bibitem is processed on the crossref servers which try
@@ -756,8 +764,7 @@ def crossref_metadata_from_query(bibitem):
     ]
     SIMPLE_EXTRACT = ["DOI", "URL", "type", "score"]
 
-    # cr = Crossref(mailto="matejvedak@gmail.com")
-    cr = Crossref()
+    cr = Crossref(mailto="matejvedak@gmail.com")
 
     x = cr.works(query_bibliographic=bibitem, limit=1)
     if x["message"]["items"]:
@@ -795,15 +802,34 @@ def crossref_metadata_from_query(bibitem):
         except KeyError:
             metadata["container"] = "null"
     else:
-        metadata = {item:"null" for item in OF_INTEREST}
+        metadata = {item: "null" for item in OF_INTEREST}
 
     return metadata
+
+def clean_up_bibtex(bibitem: str) -> str:
+    """
+    This function cleans up a bibtex entry. It removes unnecessary characters in an 
+    attempt to improve matching precision and improve matching speed.
+
+    Currently it cleans up:
+
+    Args:
+        bibitem (str): full bibtex reference entry
+
+    Returns:
+        str: cleaned up bibtex reference entry
+    """
+    # Clean up simple characters: {}[]
+    reduntant_characters = r"{}[]"
+    bibitem = bibitem.translate({ord(char):None for char in reduntant_characters})
+
+    return bibitem
 
 
 time1 = time.time()
 create_database()
 time2 = time.time()
-print(f'It took me {time2-time1:.2f}s to process a 100 papers.')
+print(f"It took me {time2-time1:.2f}s to process a 100 papers.")
 
 # print(check_doi_registration_agency("10.1109/TAC.2018.2876389"))
 # print(crossref_metadata_from_doi("10.1109/TAC.2018.2876389"))
@@ -813,3 +839,5 @@ print(f'It took me {time2-time1:.2f}s to process a 100 papers.')
 #        "Wooldridge, J. M. (2009). On estimating firm-level production functions using proxy variables to control for unobservables. Economics Letters, 104(3):112–114."
 #    )
 # )
+
+test_item = "\showarticletitle{Shuffling a stacked deck: the case for partially randomized ranking of search engine results}"
