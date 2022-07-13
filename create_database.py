@@ -146,6 +146,7 @@ def create_database():
         summary (abstract)
         arxiv_comment (Can contain information on where the article was published)
         arxiv_primary_category
+        time_taken
 
     Crossref metadata:
         DOI
@@ -156,9 +157,10 @@ def create_database():
         type (journal-article, book, ...)
         container (where it was published)
         score (if it was a reference match, if it was queried through a doi there is no score)
+        time_taken
 
     Common metadata:
-        title, authors, URL, published
+        title, authors, URL, published, time_taken
     Arxiv specific:
         arxiv_id, summary, arxiv_comment, arxiv_primary_category
     Crossref specific:
@@ -167,7 +169,7 @@ def create_database():
     COMMON_FIELDS = ["title", "author", "URL", "published"]
     ARXIV_FIELDS = ["arxiv_id", "summary", "arxiv_comment", "arxiv_primary_category"]
     CROSSREF_FIELDS = ["DOI", "type", "container", "score"]
-    con = sqlite3.connect("test.db")
+    con = sqlite3.connect("cleaned_table.db")
     cur = con.cursor()
     cur.execute(
         """CREATE TABLE reference_tree
@@ -186,6 +188,7 @@ def create_database():
                 container,
                 score,
                 length_of_bibitem,
+                time_taken,
                 bibitem
                 )"""
     )
@@ -203,6 +206,7 @@ def create_database():
                 authors = metadata["authors"]
                 URL = metadata["URL"]
                 published = metadata["published"]
+                time_taken = metadata["time_taken"]
 
                 if "arxiv_id" in metadata.keys():
                     tip = "arxiv_id"
@@ -231,7 +235,7 @@ def create_database():
                     arxiv_category = "null"
 
                 cur.execute(
-                    "INSERT INTO reference_tree VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO reference_tree VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         paper_id,
                         i,
@@ -248,6 +252,7 @@ def create_database():
                         container,
                         score,
                         len(bibitems[i]),
+                        time_taken,
                         bibitems[i],
                     ),
                 )  # tip is Croatian for type, can't use type since it is a reserved keyword
@@ -374,7 +379,6 @@ def get_citations(list_of_files):
             # Strip the empty spaces
             list_of_bibitems = [item.strip() for item in list_of_bibitems]
             print(f"Found {len(list_of_bibitems)} references.")
-            bibitems += list_of_bibitems
 
             for i, bibitem in enumerate(list_of_bibitems):
                 print(f"Processing reference number {i}.")
@@ -399,25 +403,38 @@ def get_citations(list_of_files):
                             md = crossref_metadata_from_doi(results_doi)
                     except:
                         print(f"DOI couldn't be resolved, querying CrossRef.")
+                        # Clean up the bibitem before sending it to crossref
+                        # Might perform better
+                        bibitem = clean_up_bibtex(bibitem)
                         md = crossref_metadata_from_query(bibitem)
                     citations.append(md)
+                    bibitems.append(bibitem)
+
                 elif strict_arxiv_id:
                     strict_arxiv_id = clean_arxiv_id(strict_arxiv_id[0])
                     print(f"Found an arXiv ID (strict) {strict_arxiv_id}.")
                     md = arxiv_metadata_from_id(strict_arxiv_id)
                     citations.append(md)
+                    bibitems.append(bibitem)
+
                 elif flexible_arxiv_id:
                     flexible_arxiv_id = clean_arxiv_id(flexible_arxiv_id[0])
                     print(f"Found an arXiv ID (flexible) {flexible_arxiv_id}.")
                     md = arxiv_metadata_from_id(flexible_arxiv_id)
                     citations.append(md)
+                    bibitems.append(bibitem)
+
                 else:
                     # If all of these methods fail we need to utilize some other method
                     # We use crossref and their reference matching system
                     # See https://www.crossref.org/categories/reference-matching/#:~:text=Matching%20(or%20resolving)%20bibliographic%20references,indexes%2C%20impact%20factors%2C%20etc.
                     time1 = time.time()
+                    # Clean up the bibitem before sending it to crossref
+                    # Might perform better
+                    bibitem = clean_up_bibtex(bibitem)
                     md = crossref_metadata_from_query(bibitem)
                     citations.append(md)
+                    bibitems.append(bibitem)
                     time2 = time.time()
                     print(
                         f"Resorted to CrossRef, time taken to retrieve metadata: {time2-time1:.2f}s"
@@ -539,6 +556,9 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
         arxiv_comment,
         arxiv_primary_category
 
+    Additionally, we store time_taken which is the amount of time
+    taken to get a response from the API
+
     Args:
         arxivID (str): a valid arXiv ID
 
@@ -562,7 +582,9 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
 
     query = "id_list=%s" % arxivID
 
+    time1 = time.time()
     response = retrieve_rawdata(base_url + query)
+    time2 = time.time()
 
     feed = feedparser.parse(response)
     entry = feed.entries[0]
@@ -603,6 +625,8 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
         metadata["arxiv_primary_category"] = entry["arxiv_primary_category"]["term"]
     except KeyError:
         metadata["arxiv_primary_category"] = "null"
+
+    metadata["time_taken"] = time2 - time1
 
     return metadata
 
@@ -667,6 +691,9 @@ def crossref_metadata_from_doi(doi: str) -> dict:
     'short-title', 'issued', 'references-count', 'URL', 'relation', 'ISSN',
     'issn-type', 'published']
 
+    Additionally we store time_taken which is the amount of time taken to get
+    a response from the CrossRef REST API.
+
     Args:
         doi (str): a valid DOI identifier
 
@@ -676,8 +703,12 @@ def crossref_metadata_from_doi(doi: str) -> dict:
     """
     OF_INTEREST = ["DOI", "title", "author", "URL", "published", "type", "container"]
     SIMPLE_EXTRACT = ["DOI", "URL", "type"]
+
+    time1 = time.time()
     cr = Crossref(mailto="matejvedak@gmail.com")
     work = cr.works(ids=doi)["message"]
+    time2 = time.time()
+
     metadata = {}
     # Extract simple entries
     for item in SIMPLE_EXTRACT:
@@ -710,6 +741,8 @@ def crossref_metadata_from_doi(doi: str) -> dict:
         metadata["container"] = work["container-title"][0]
     except KeyError:
         metadata["container"] = "null"
+
+    metadata["time_taken"] = time2 - time1
 
     return metadata
 
@@ -745,6 +778,9 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
     'short-title', 'issued', 'references-count', 'URL', 'relation', 'ISSN',
     'issn-type', 'published']
 
+    Additionally we store time_taken which is the amount of time taken to get
+    a response from the CrossRef REST API.
+
     Args:
         bibitem (str): full bibtex entry of the wanted reference
 
@@ -764,9 +800,11 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
     ]
     SIMPLE_EXTRACT = ["DOI", "URL", "type", "score"]
 
+    time1 = time.time()
     cr = Crossref(mailto="matejvedak@gmail.com")
-
     x = cr.works(query_bibliographic=bibitem, limit=1)
+    time2 = time.time()
+
     if x["message"]["items"]:
         bestItem = x["message"]["items"][0]
 
@@ -801,8 +839,12 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
             metadata["container"] = bestItem["container-title"][0]
         except KeyError:
             metadata["container"] = "null"
+
+        metadata["time_taken"] = time2 - time1
+
     else:
         metadata = {item: "null" for item in OF_INTEREST}
+        metadata["time_taken"] = time2 - time1
 
     return metadata
 
@@ -819,9 +861,26 @@ def clean_up_bibtex(bibitem: str) -> str:
     Returns:
         str: cleaned up bibtex reference entry
     """
+    # Many bibtex items start with the local reference name enclosed within the '{}'
+    # brackets. If they do start with '{' we can remove it immediatelly
+    if bibitem[0] == '{':
+        i = 1
+        while bibitem[i] != '}':
+            i += 1
+        bibitem = bibitem[i:]    
+    
+    # Clean up latex items like \em{} etc
+    pattern = re.compile(r"\\[A-z]+{")
+    bibitem = re.sub(pattern, '', bibitem)
+    # Clean up item like \newblock (items which don't utilize '{}')
+    pattern = re.compile(r"\\[A-z]+")
+    bibitem = re.sub(pattern, '', bibitem)
+    # Remove '\n'
+    pattern = re.compile(r"\n")
+    bibitem = re.sub(pattern, '', bibitem)
     # Clean up simple characters: {}[]
-    reduntant_characters = r"{}[]"
-    bibitem = bibitem.translate({ord(char):None for char in reduntant_characters})
+    reduntant_characters = r"{}[]\"'"
+    bibitem = bibitem.translate({ord(char):None for char in reduntant_characters}).strip()
 
     return bibitem
 
@@ -839,5 +898,3 @@ print(f"It took me {time2-time1:.2f}s to process a 100 papers.")
 #        "Wooldridge, J. M. (2009). On estimating firm-level production functions using proxy variables to control for unobservables. Economics Letters, 104(3):112–114."
 #    )
 # )
-
-test_item = "\showarticletitle{Shuffling a stacked deck: the case for partially randomized ranking of search engine results}"
