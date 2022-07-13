@@ -881,12 +881,15 @@ def clean_up_bibtex(bibitem: str) -> str:
     # Clean up simple characters: {}[]
     reduntant_characters = r"{}[]\"'"
     bibitem = bibitem.translate({ord(char):None for char in reduntant_characters}).strip()
+    # Remove reduntant white space
+    pattern = re.compile(r"\s{2,}")
+    bibitem = re.sub(pattern, ' ', bibitem)
 
     return bibitem
 
 
 time1 = time.time()
-create_database()
+#create_database()
 time2 = time.time()
 print(f"It took me {time2-time1:.2f}s to process a 100 papers.")
 
