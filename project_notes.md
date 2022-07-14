@@ -28,7 +28,35 @@ One thing we were interested in during this project was how many references do c
 The results were pretty much what was expected. The reference percentage increases through the years as the arXiv ids became more standardized. However, maximum average percentage is around 50% as there are a lot of papers that aren't in the arXiv database. Furthermore, it looks like authors either put an arXiv id in almost every reference they have (and for which there exists and arXiv paper) or almost nowhere at all. The median and Q1 and Q3 data seems to support this.
 ![Statistical data for arXiv id percentage within arXiv papers throughout the years](/arxivIDs_percentage_analysis/arxiv_id_percentage_median_grqc.png)
 
-Results
+Having all the pieces in place, a robust metadata extraction system was constructed. If we can find an arXiv id within a reference metadata is extracted from the arXiv API. If we find a DOI or there is neither a DOI nor arXiv id crossref API is queried for metadata extraction. Metadata fields we are interested in are split into three groups: common metadata, arXiv specific and CrossRef specific.
+Common metadata:
+
+* arxiv_id/DOI
+* title
+* authors
+* URL (link)
+* date of publishing
+
+ArXiv specific metadata:
+
+* summary (usually the abstract)
+* arxiv_comment (often contains information on where the paper was published)
+* arxiv_primary_category
+
+CrossRef specific metadata:
+
+* publication type (book, paper, ...)
+* container (where it was published)
+* score (only applies to entries that we didn't find a DOI for, specifies how 'certain' CrossRef is in the match)
+
+Some other data was extracted which was used mostly for performance testing:
+
+* length of the pure reference
+* time taken to extract metadata
+
+Extracted metadata was stored in a database. To start with, we utilized SQLite. SQLite is a simple, robust and quick databse usually used for small entreprise products. All of the above metadata fields were stored for each reference. It took about 3.5 hours to process a 100 papers. Unfortunatelly, this is unnaceptable considering there are about 2000 papers released daily on arXiv.
+
+The main speed bottleneck is the crossref API query. Depending on the reference it can take up to 15 seconds to get a response from the server. The simplest and perhaps the easiest idea to improve this performance is to query references in bulk instead of one-by-one. Unfortunatelly, CrossRef's REST API doesn't provide this capability so we started looking into CrossRef's XML API.
 
 ## Code description
 
