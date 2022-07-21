@@ -8,11 +8,12 @@ import time
 import urllib.error
 import urllib.request
 import chardet
+import time
+
 import feedparser
+from habanero import Crossref
 
 from arxiv_regex.arxiv_regex import *
-from habanero import Crossref
-import time
 
 SOURCE_FOLDER = "dummy"
 
@@ -848,9 +849,10 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
 
     return metadata
 
+
 def clean_up_bibtex(bibitem: str) -> str:
     """
-    This function cleans up a bibtex entry. It removes unnecessary characters in an 
+    This function cleans up a bibtex entry. It removes unnecessary characters in an
     attempt to improve matching precision and improve matching speed.
 
     Currently it cleans up:
@@ -863,33 +865,35 @@ def clean_up_bibtex(bibitem: str) -> str:
     """
     # Many bibtex items start with the local reference name enclosed within the '{}'
     # brackets. If they do start with '{' we can remove it immediatelly
-    if bibitem[0] == '{':
+    if bibitem[0] == "{":
         i = 1
-        while bibitem[i] != '}':
+        while bibitem[i] != "}":
             i += 1
-        bibitem = bibitem[i:]    
-    
+        bibitem = bibitem[i:]
+
     # Clean up latex items like \em{} etc
     pattern = re.compile(r"\\[A-z]+{")
-    bibitem = re.sub(pattern, '', bibitem)
+    bibitem = re.sub(pattern, "", bibitem)
     # Clean up item like \newblock (items which don't utilize '{}')
     pattern = re.compile(r"\\[A-z]+")
-    bibitem = re.sub(pattern, '', bibitem)
+    bibitem = re.sub(pattern, "", bibitem)
     # Remove '\n'
     pattern = re.compile(r"\n")
-    bibitem = re.sub(pattern, '', bibitem)
+    bibitem = re.sub(pattern, "", bibitem)
     # Clean up simple characters: {}[]
     reduntant_characters = r"{}[]\"'"
-    bibitem = bibitem.translate({ord(char):None for char in reduntant_characters}).strip()
+    bibitem = bibitem.translate(
+        {ord(char): None for char in reduntant_characters}
+    ).strip()
     # Remove reduntant white space
     pattern = re.compile(r"\s{2,}")
-    bibitem = re.sub(pattern, ' ', bibitem)
+    bibitem = re.sub(pattern, " ", bibitem)
 
     return bibitem
 
 
 time1 = time.time()
-#create_database()
+# create_database()
 time2 = time.time()
 print(f"It took me {time2-time1:.2f}s to process a 100 papers.")
 

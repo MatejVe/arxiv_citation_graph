@@ -8,6 +8,8 @@ habanero = "*"
 feedparser = "*"
 chardet = "*"
 matplotlib = "*"
+untangle = "*"
+pypdf2 = "*"
 
 [dev-packages]
 
