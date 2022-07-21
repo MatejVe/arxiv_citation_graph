@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 import chardet
 import time
+from copy import deepcopy
 
 import feedparser
 from habanero import Crossref
@@ -132,6 +133,61 @@ subset_of_papers_ids = [
 test_paper = ["math-ph/0303034"]
 
 
+class AttrDict(dict):
+    """
+    Type of dictionary that can't be assigned new keys to.
+    A caveat is that the initialization of the dictionary is a bit different:
+    keys = ["a", "b"]
+    values = [1, 2]
+    dict = AttrDict(zip(keys, values))
+
+    The idea is to set a standard for a metadata dictionary so that later mistakes
+    can be avoided.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__dict__ = self
+
+    def __setattr__(self, key, value):
+        if key not in [*self.keys(), "__dict__"]:
+            raise KeyError(f"No new keys allowed - {key}")
+        else:
+            super().__setattr__(key, value)
+
+    def __setitem__(self, key, value):
+        if key not in self:
+            raise KeyError(f"No new keys allowed - {key}")
+        else:
+            super().__setitem__(key, value)
+
+
+FIELDS_TO_STORE = [
+    "paper_id",
+    "reference_num",
+    "id_type",
+    "reference_id",
+    "title",
+    "authors",
+    "URL",
+    "published",
+    "summary",
+    "arxiv_comment",
+    "arxiv_primary_category",
+    "type",
+    "container",
+    "score",
+    "length_of_bibitem",
+    "time_taken",
+    "bibitem",
+]
+values = ["null"] * len(FIELDS_TO_STORE)
+
+def create_default_md_dict(fields_to_store: list) -> AttrDict:
+    values = ["null"] * len(fields_to_store)
+    return AttrDict(zip(FIELDS_TO_STORE, values))
+
+
 def create_database():
     """
     This function takes the arxiv ids above, downloads the files for this
@@ -170,10 +226,13 @@ def create_database():
     COMMON_FIELDS = ["title", "author", "URL", "published"]
     ARXIV_FIELDS = ["arxiv_id", "summary", "arxiv_comment", "arxiv_primary_category"]
     CROSSREF_FIELDS = ["DOI", "type", "container", "score"]
-    con = sqlite3.connect("cleaned_table.db")
+    con = sqlite3.connect("test.db")
     cur = con.cursor()
-    cur.execute(
-        """CREATE TABLE reference_tree
+
+    cur.execute("CREATE TABLE reference_tree ({})".format(",".join(FIELDS_TO_STORE)))
+
+    # Kept it as a reference if something goes wrong
+    PREVIOUS_COMMAND = """CREATE TABLE reference_tree
                 (paper_id, 
                 reference_num, 
                 id_type,
@@ -192,7 +251,6 @@ def create_database():
                 time_taken,
                 bibitem
                 )"""
-    )
 
     for i, paper_id in enumerate(list_of_paper_ids):
         print("process paper %s, %d" % (paper_id, i))
@@ -202,61 +260,15 @@ def create_database():
             # Here we will store the citations in the database
             # citations should contain a reliable list of identifiers,
             # such as dois or arxiv_ids
-            for i, metadata in enumerate(citations_data):
-                title = metadata["title"]
-                authors = metadata["authors"]
-                URL = metadata["URL"]
-                published = metadata["published"]
-                time_taken = metadata["time_taken"]
+            for i, md in enumerate(citations_data):
+                WHAT_GETS_ASSIGNED = ["paper_id", "reference_num", "length_of_bibitem", "bibitem"]
+                md["paper_id"] = paper_id
+                md["reference_num"] = i+1
+                md["length_of_bibitem"] = len(bibitems[i])
+                md["bibitem"] = bibitems[i]
 
-                if "arxiv_id" in metadata.keys():
-                    tip = "arxiv_id"
-                    ident = metadata["arxiv_id"]
-                    summary = metadata["summary"]
-                    arxiv_comment = metadata["arxiv_comment"]
-                    arxiv_category = metadata["arxiv_primary_category"]
-                    # Set the crossref categories to null
-                    item_type = "null"
-                    container = "null"
-                    score = "null"
-                elif "DOI" in metadata.keys():
-                    tip = "crossDOI"
-                    ident = metadata["DOI"]
-                    item_type = metadata["type"]
-                    container = metadata["container"]
-                    if (
-                        "score" in metadata.keys()
-                    ):  # Some items don't have score - identified through a doi
-                        score = metadata["score"]
-                    else:
-                        score = "null"
-                    # Set the arxiv categories to null
-                    summary = "null"
-                    arxiv_comment = "null"
-                    arxiv_category = "null"
-
-                cur.execute(
-                    "INSERT INTO reference_tree VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        paper_id,
-                        i,
-                        tip,
-                        ident,
-                        title,
-                        authors,
-                        URL,
-                        published,
-                        summary,
-                        arxiv_comment,
-                        arxiv_category,
-                        item_type,
-                        container,
-                        score,
-                        len(bibitems[i]),
-                        time_taken,
-                        bibitems[i],
-                    ),
-                )  # tip is Croatian for type, can't use type since it is a reserved keyword
+                QUESTIONMARKS = ','.join(['?']*len(md))
+                cur.execute("INSERT INTO reference_tree VALUES ({})".format(QUESTIONMARKS), tuple(md.values()))
                 con.commit()
 
         # To avoid running out of disk space we delete everything imediately
@@ -301,12 +313,15 @@ def retrieve_rawdata(url):
     This function gets the data from a web location and returns the
     raw data
     """
+    time1 = time.time()
     retries = 0
     while retries < 3:
         try:
             # response = requests.get(url)
             with urllib.request.urlopen(url) as response:
                 rawdata = response.read()
+            time2 = time.time()
+            print(f'It took me {time2-time1:.2f}s to retrieve data from {url}.')
             return rawdata
         except urllib.error.HTTPError as e:
             sleep_sec = int(e.hdrs.get("retry-after", 30))
@@ -567,16 +582,18 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
         dict: a dictionary with keys being the fields we are
                 interested in above
     """
-    OF_INTEREST = [
-        "arxiv_id",
-        "title",
+    WHAT_GETS_ASSIGNED_HERE = [
+        "reference_id",
+        "id_type" "title",
         "authors",
-        "link",
+        "URL",
         "published",
         "summary",
         "arxiv_comment",
         "arxiv_primary_category",
+        "time_taken",
     ]
+
     SIMPLE_EXTRACT = ["title", "summary", "arxiv_comment"]
 
     base_url = "http://export.arxiv.org/api/query?"
@@ -590,42 +607,44 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
     feed = feedparser.parse(response)
     entry = feed.entries[0]
 
-    metadata = {}
+    metadata = create_default_md_dict(FIELDS_TO_STORE)
+
+    metadata["id_type"] = "arxiv_ID"
     # Extract the simple entries
     for item in SIMPLE_EXTRACT:
         try:
             metadata[item] = entry[item]
-        except KeyError:
-            metadata[item] = "null"
+        except Exception as e:
+            print(f"Something went wrong when extracting {item}. Exception: {e}")
 
     # Extract entries that require some postprocessing
     try:
-        metadata["arxiv_id"] = entry.id.split("/abs/")[-1]
-    except KeyError:
-        metadata["arxiv_id"] = "null"
+        metadata["reference_id"] = entry.id.split("/abs/")[-1]
+    except Exception as e:
+        print(f"Something went wrong when extracting reference_id. Exception: {e}")
 
     try:
         metadata["published"] = entry["published"].split("-")[0]
-    except:
-        metadata["published"] = "null"
+    except Exception as e:
+        print(f"Something went wrong when extracting published. Exception: {e}")
 
     try:
         authors = entry["authors"]
         metadata["authors"] = ", ".join([author["name"] for author in authors])
-    except KeyError:
-        metadata["authors"] = "null"
+    except Exception as e:
+        print(f"Something went wrong when extracting authors. Exception: {e}")
 
     try:
         for link in entry.links:
             if link.rel == "alternate":
                 metadata["URL"] = link.href
-    except KeyError:
-        metadata["URL"] = "null"
+    except Exception as e:
+        print(f"Something went wrong when extracting URL. Exception: {e}")
 
     try:
         metadata["arxiv_primary_category"] = entry["arxiv_primary_category"]["term"]
-    except KeyError:
-        metadata["arxiv_primary_category"] = "null"
+    except Exception as e:
+        print(f"Something went wrong when extracting arxiv_primary_category. Exception: {e}")
 
     metadata["time_taken"] = time2 - time1
 
@@ -702,46 +721,63 @@ def crossref_metadata_from_doi(doi: str) -> dict:
         dict: a dictionary with keys that correspond to fields we are interested in
                 above
     """
-    OF_INTEREST = ["DOI", "title", "author", "URL", "published", "type", "container"]
-    SIMPLE_EXTRACT = ["DOI", "URL", "type"]
+    WHAT_GETS_ASSIGNED = [
+        "id_type"
+        "reference_id",
+        "title",
+        "authors",
+        "URL",
+        "published",
+        "type",
+        "container",
+        "time_taken"
+    ]
+    SIMPLE_EXTRACT = ["URL", "type"]
 
     time1 = time.time()
-    cr = Crossref(mailto="matejvedak@gmail.com")
+    #cr = Crossref(mailto="matejvedak@gmail.com")
+    cr = Crossref()
     work = cr.works(ids=doi)["message"]
     time2 = time.time()
 
-    metadata = {}
+    metadata = create_default_md_dict(FIELDS_TO_STORE)
+    metadata["id_type"] = "DOI"
     # Extract simple entries
     for item in SIMPLE_EXTRACT:
         try:
             metadata[item] = work[item]
-        except KeyError:
-            metadata[item] = "null"
+        except Exception as e:
+            print(f"Something went wrong when extracting {item}. Exception: {e}")
 
     # Extract entries that require some postprocessing
     try:
+        metadata["reference_id"] = work["DOI"]
+    except Exception as e:
+        print(f"Something went wrong when extracting reference id. Exception: {e}")
+
+    try:
         # Need [0] because for some reason the title comes back in a list
         metadata["title"] = work["title"][0]
-    except IndexError:
-        metadata["title"] = "null"
+    except Exception as e:
+        print(f"Something went wrong when extracting title. Exception: {e}")
 
     try:
         authors = work["author"]
         metadata["authors"] = ", ".join(
             [author["given"] + " " + author["family"] for author in authors]
         )
-    except KeyError:
-        metadata["authors"] = "null"
+    except Exception as e:
+        print(f"Something went wrong when extracting author. Exception: {e}")
 
     try:
         metadata["published"] = work["published"]["date-parts"][0][0]
-    except KeyError:
-        metadata["published"] = "null"
+    except Exception as e:
+        print(f"Something went wrong when extracting published. Exception: {e}")
 
     try:
         metadata["container"] = work["container-title"][0]
-    except KeyError:
-        metadata["container"] = "null"
+    except Exception as e:
+        print(f"Something went wrong when extracting container. Exception: {e}")
 
     metadata["time_taken"] = time2 - time1
 
@@ -789,7 +825,7 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
         dict: a dictionary with keys that correspond to fields we are interested in
                 above
     """
-    OF_INTEREST = [
+    WHAT_GETS_ASSIGNED = [
         "DOI",
         "title",
         "authors",
@@ -799,53 +835,56 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
         "container",
         "score",
     ]
-    SIMPLE_EXTRACT = ["DOI", "URL", "type", "score"]
+    SIMPLE_EXTRACT = ["URL", "type", "score"]
 
     time1 = time.time()
-    cr = Crossref(mailto="matejvedak@gmail.com")
+    #cr = Crossref(mailto="matejvedak@gmail.com")
+    cr = Crossref()
     x = cr.works(query_bibliographic=bibitem, limit=1)
     time2 = time.time()
 
+    metadata = create_default_md_dict(FIELDS_TO_STORE)
+    
     if x["message"]["items"]:
         bestItem = x["message"]["items"][0]
 
-        metadata = {}
+        metadata["id_type"] = "DOI"
+        try:
+            metadata["reference_id"] = bestItem["DOI"]
+        except Exception as e:
+            print(f"Something went wrong when extracting {item}. Exception: {e}")
+        
         # Extract the simple items
         for item in SIMPLE_EXTRACT:
             try:
                 metadata[item] = bestItem[item]
-            except:
-                metadata[item] = "null"
+            except Exception as e:
+                print(f"Something went wrong when extracting {item}. Exception: {e}")
 
         # Extract the items that require postprocessing
         try:
             metadata["title"] = bestItem["title"][0]
-        except KeyError:
-            metadata["title"] = "null"
+        except Exception as e:
+            print(f"Something went wrong when extracting title. Exception: {e}")
 
         try:
             authors = bestItem["author"]
             metadata["authors"] = ", ".join(
                 [author["given"] + " " + author["family"] for author in authors]
             )
-        except KeyError:
-            metadata["authors"] = "null"
+        except Exception as e:
+            print(f"Something went wrong when extracting author. Exception: {e}")
 
         try:
             metadata["published"] = bestItem["published"]["date-parts"][0][0]
-        except KeyError:
-            metadata["published"] = "null"
+        except Exception as e:
+            print(f"Something went wrong when extracting published. Exception: {e}")
 
         try:
             metadata["container"] = bestItem["container-title"][0]
-        except KeyError:
-            metadata["container"] = "null"
-
-        metadata["time_taken"] = time2 - time1
-
-    else:
-        metadata = {item: "null" for item in OF_INTEREST}
-        metadata["time_taken"] = time2 - time1
+        except Exception as e:
+            print(f"Something went wrong when extracting container. Exception: {e}")
+    metadata["time_taken"] = time2 - time1
 
     return metadata
 
@@ -893,7 +932,7 @@ def clean_up_bibtex(bibitem: str) -> str:
 
 
 time1 = time.time()
-# create_database()
+create_database()
 time2 = time.time()
 print(f"It took me {time2-time1:.2f}s to process a 100 papers.")
 
