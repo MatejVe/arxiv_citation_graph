@@ -128,6 +128,11 @@ subset_of_papers_ids = [
     "0908.2474",
     "1610.04816",
     "1901.00305",
+    "1409.1557",
+    "1710.03830",
+    "1902.05953",
+    "1012.2145",
+    "1008.4706",
 ]
 
 test_paper = ["math-ph/0303034"]
@@ -179,9 +184,11 @@ FIELDS_TO_STORE = [
     "score",
     "length_of_bibitem",
     "time_taken",
+    "clean_bibitem",
     "bibitem",
 ]
 values = ["null"] * len(FIELDS_TO_STORE)
+
 
 def create_default_md_dict(fields_to_store: list) -> AttrDict:
     values = ["null"] * len(fields_to_store)
@@ -226,49 +233,37 @@ def create_database():
     COMMON_FIELDS = ["title", "author", "URL", "published"]
     ARXIV_FIELDS = ["arxiv_id", "summary", "arxiv_comment", "arxiv_primary_category"]
     CROSSREF_FIELDS = ["DOI", "type", "container", "score"]
-    con = sqlite3.connect("test.db")
+    con = sqlite3.connect("clean.db")
     cur = con.cursor()
 
     cur.execute("CREATE TABLE reference_tree ({})".format(",".join(FIELDS_TO_STORE)))
-
-    # Kept it as a reference if something goes wrong
-    PREVIOUS_COMMAND = """CREATE TABLE reference_tree
-                (paper_id, 
-                reference_num, 
-                id_type,
-                reference_id, 
-                title, 
-                authors, 
-                URL, 
-                published,
-                summary,
-                arxiv_comment,
-                arxiv_primary_category,
-                type,
-                container,
-                score,
-                length_of_bibitem,
-                time_taken,
-                bibitem
-                )"""
 
     for i, paper_id in enumerate(list_of_paper_ids):
         print("process paper %s, %d" % (paper_id, i))
         filename, list_of_files = get_file(paper_id)
         if list_of_files:
-            citations_data, bibitems = get_citations(list_of_files)
+            citations_data, clean_bibitems, bibitems = get_citations(list_of_files)
             # Here we will store the citations in the database
             # citations should contain a reliable list of identifiers,
             # such as dois or arxiv_ids
             for i, md in enumerate(citations_data):
-                WHAT_GETS_ASSIGNED = ["paper_id", "reference_num", "length_of_bibitem", "bibitem"]
+                WHAT_GETS_ASSIGNED = [
+                    "paper_id",
+                    "reference_num",
+                    "length_of_bibitem",
+                    "bibitem",
+                ]
                 md["paper_id"] = paper_id
-                md["reference_num"] = i+1
+                md["reference_num"] = i + 1
                 md["length_of_bibitem"] = len(bibitems[i])
+                md["clean_bibitem"] = clean_bibitems[i]
                 md["bibitem"] = bibitems[i]
 
-                QUESTIONMARKS = ','.join(['?']*len(md))
-                cur.execute("INSERT INTO reference_tree VALUES ({})".format(QUESTIONMARKS), tuple(md.values()))
+                QUESTIONMARKS = ",".join(["?"] * len(md))
+                cur.execute(
+                    "INSERT INTO reference_tree VALUES ({})".format(QUESTIONMARKS),
+                    tuple(md.values()),
+                )
                 con.commit()
 
         # To avoid running out of disk space we delete everything imediately
@@ -321,7 +316,7 @@ def retrieve_rawdata(url):
             with urllib.request.urlopen(url) as response:
                 rawdata = response.read()
             time2 = time.time()
-            print(f'It took me {time2-time1:.2f}s to retrieve data from {url}.')
+            print(f"It took me {time2-time1:.2f}s to retrieve data from {url}.")
             return rawdata
         except urllib.error.HTTPError as e:
             sleep_sec = int(e.hdrs.get("retry-after", 30))
@@ -376,6 +371,7 @@ def get_citations(list_of_files):
     citation information and returns a list of arxiv_ids
     """
     citations = []
+    clean_bibitems = []
     bibitems = []
     for filename in list_of_files:
         print(f"Looking into {filename}.")
@@ -398,65 +394,59 @@ def get_citations(list_of_files):
 
             for i, bibitem in enumerate(list_of_bibitems):
                 print(f"Processing reference number {i}.")
+                # Some bibitems come out just as '{}' for examle
+                # We don't process these as it is obviously a faulty reference
+                if len(bibitem) > 4:
+                    # for each citation check whether there is an doi tag
+                    # Since DOI is a strong identifier and the regex doesn't
+                    # seem to be producing false positives we save the doi
+                    results_doi = check_for_doi(bibitem)
+                    # TODO: rewrite this code logic when you think of something better
+                    # next we do a strict arxiv id check
+                    # strict arxiv is reliable and if there is a strict arxiv id then save it
+                    strict_arxiv_id = check_for_arxiv_id_strict(bibitem)
+                    # finally do a flexible arxiv id check
+                    flexible_arxiv_id = check_for_arxiv_id_flexible(bibitem)
 
-                # for each citation check whether there is an doi tag
-                # Since DOI is a strong identifier and the regex doesn't
-                # seem to be producing false positives we save the doi
-                results_doi = check_for_doi(bibitem)
-                # TODO: rewrite this code logic when you think of something better
-                # next we do a strict arxiv id check
-                # strict arxiv is reliable and if there is a strict arxiv id then save it
-                strict_arxiv_id = check_for_arxiv_id_strict(bibitem)
-                # finally do a flexible arxiv id check
-                flexible_arxiv_id = check_for_arxiv_id_flexible(bibitem)
-
-                if results_doi:
-                    # for some reason it comes back in a list
-                    results_doi = results_doi[0]
-                    print(f"Found a DOI.")
-                    try:  # In come cases the extracted DOI is faulty and will return an error
-                        if check_doi_registration_agency(results_doi) == "Crossref":
-                            md = crossref_metadata_from_doi(results_doi)
-                    except:
-                        print(f"DOI couldn't be resolved, querying CrossRef.")
-                        # Clean up the bibitem before sending it to crossref
-                        # Might perform better
-                        bibitem = clean_up_bibtex(bibitem)
-                        md = crossref_metadata_from_query(bibitem)
-                    citations.append(md)
+                    # cleaned bibitems are used to query crossref
+                    # hope it increases performance
+                    clean_bibitem = clean_up_bibtex(bibitem)
                     bibitems.append(bibitem)
+                    clean_bibitems.append(clean_bibitem)
 
-                elif strict_arxiv_id:
-                    strict_arxiv_id = clean_arxiv_id(strict_arxiv_id[0])
-                    print(f"Found an arXiv ID (strict) {strict_arxiv_id}.")
-                    md = arxiv_metadata_from_id(strict_arxiv_id)
+                    if results_doi:
+                        # for some reason it comes back in a list
+                        results_doi = results_doi[0]
+                        print(f"Found a DOI.")
+                        try:  # In come cases the extracted DOI is faulty and will return an error
+                            if check_doi_registration_agency(results_doi) == "Crossref":
+                                md = crossref_metadata_from_doi(results_doi)
+                        except:
+                            print(f"DOI couldn't be resolved, querying CrossRef.")
+                            md = crossref_metadata_from_query(clean_bibitem)
+
+                    elif strict_arxiv_id:
+                        strict_arxiv_id = clean_arxiv_id(strict_arxiv_id[0])
+                        print(f"Found an arXiv ID (strict) {strict_arxiv_id}.")
+                        md = arxiv_metadata_from_id(strict_arxiv_id)
+
+                    elif flexible_arxiv_id:
+                        flexible_arxiv_id = clean_arxiv_id(flexible_arxiv_id[0])
+                        print(f"Found an arXiv ID (flexible) {flexible_arxiv_id}.")
+                        md = arxiv_metadata_from_id(flexible_arxiv_id)
+
+                    else:
+                        # If all of these methods fail we need to utilize some other method
+                        # We use crossref and their reference matching system
+                        # See https://www.crossref.org/categories/reference-matching/#:~:text=Matching%20(or%20resolving)%20bibliographic%20references,indexes%2C%20impact%20factors%2C%20etc.
+                        time1 = time.time()
+                        md = crossref_metadata_from_query(clean_bibitem)
+                        time2 = time.time()
+                        print(
+                            f"Resorted to CrossRef, time taken to retrieve metadata: {time2-time1:.2f}s"
+                        )
                     citations.append(md)
-                    bibitems.append(bibitem)
-
-                elif flexible_arxiv_id:
-                    flexible_arxiv_id = clean_arxiv_id(flexible_arxiv_id[0])
-                    print(f"Found an arXiv ID (flexible) {flexible_arxiv_id}.")
-                    md = arxiv_metadata_from_id(flexible_arxiv_id)
-                    citations.append(md)
-                    bibitems.append(bibitem)
-
-                else:
-                    # If all of these methods fail we need to utilize some other method
-                    # We use crossref and their reference matching system
-                    # See https://www.crossref.org/categories/reference-matching/#:~:text=Matching%20(or%20resolving)%20bibliographic%20references,indexes%2C%20impact%20factors%2C%20etc.
-                    time1 = time.time()
-                    # Clean up the bibitem before sending it to crossref
-                    # Might perform better
-                    bibitem = clean_up_bibtex(bibitem)
-                    md = crossref_metadata_from_query(bibitem)
-                    citations.append(md)
-                    bibitems.append(bibitem)
-                    time2 = time.time()
-                    print(
-                        f"Resorted to CrossRef, time taken to retrieve metadata: {time2-time1:.2f}s"
-                    )
-
-    return citations, bibitems
+    return citations, clean_bibitems, bibitems
 
 
 def get_data_string(filename):
@@ -644,7 +634,9 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
     try:
         metadata["arxiv_primary_category"] = entry["arxiv_primary_category"]["term"]
     except Exception as e:
-        print(f"Something went wrong when extracting arxiv_primary_category. Exception: {e}")
+        print(
+            f"Something went wrong when extracting arxiv_primary_category. Exception: {e}"
+        )
 
     metadata["time_taken"] = time2 - time1
 
@@ -722,20 +714,19 @@ def crossref_metadata_from_doi(doi: str) -> dict:
                 above
     """
     WHAT_GETS_ASSIGNED = [
-        "id_type"
-        "reference_id",
+        "id_type" "reference_id",
         "title",
         "authors",
         "URL",
         "published",
         "type",
         "container",
-        "time_taken"
+        "time_taken",
     ]
     SIMPLE_EXTRACT = ["URL", "type"]
 
     time1 = time.time()
-    #cr = Crossref(mailto="matejvedak@gmail.com")
+    # cr = Crossref(mailto="matejvedak@gmail.com")
     cr = Crossref()
     work = cr.works(ids=doi)["message"]
     time2 = time.time()
@@ -763,8 +754,22 @@ def crossref_metadata_from_doi(doi: str) -> dict:
 
     try:
         authors = work["author"]
+        givenNames = []
+        familyNames = []
+        for author in authors:
+            try:
+                givenNames.append(author["given"])
+            except:
+                givenNames.append("")
+            try:
+                familyNames.append(author["family"])
+            except:
+                familyNames.append("")
         metadata["authors"] = ", ".join(
-            [author["given"] + " " + author["family"] for author in authors]
+            [
+                "{} {}".format(first, second)
+                for first, second in zip(givenNames, familyNames)
+            ]
         )
     except Exception as e:
         print(f"Something went wrong when extracting author. Exception: {e}")
@@ -838,13 +843,13 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
     SIMPLE_EXTRACT = ["URL", "type", "score"]
 
     time1 = time.time()
-    #cr = Crossref(mailto="matejvedak@gmail.com")
+    # cr = Crossref(mailto="matejvedak@gmail.com")
     cr = Crossref()
     x = cr.works(query_bibliographic=bibitem, limit=1)
     time2 = time.time()
 
     metadata = create_default_md_dict(FIELDS_TO_STORE)
-    
+
     if x["message"]["items"]:
         bestItem = x["message"]["items"][0]
 
@@ -853,7 +858,7 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
             metadata["reference_id"] = bestItem["DOI"]
         except Exception as e:
             print(f"Something went wrong when extracting {item}. Exception: {e}")
-        
+
         # Extract the simple items
         for item in SIMPLE_EXTRACT:
             try:
@@ -867,10 +872,26 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
         except Exception as e:
             print(f"Something went wrong when extracting title. Exception: {e}")
 
+        # TODO: replace all the try except blocks with .get() method
+        # where applicable of course
         try:
             authors = bestItem["author"]
+            givenNames = []
+            familyNames = []
+            for author in authors:
+                try:
+                    givenNames.append(author["given"])
+                except:
+                    givenNames.append("")
+                try:
+                    familyNames.append(author["family"])
+                except:
+                    familyNames.append("")
             metadata["authors"] = ", ".join(
-                [author["given"] + " " + author["family"] for author in authors]
+                [
+                    "{} {}".format(first, second)
+                    for first, second in zip(givenNames, familyNames)
+                ]
             )
         except Exception as e:
             print(f"Something went wrong when extracting author. Exception: {e}")
@@ -902,13 +923,29 @@ def clean_up_bibtex(bibitem: str) -> str:
     Returns:
         str: cleaned up bibtex reference entry
     """
+
+    def remove_from_beggining(openTag, closeTag, string):
+        try:
+            if string[0] == openTag:
+                i = 1
+                while string[i] != closeTag:
+                    i += 1
+                return string[i + 1 :]
+            return string
+        except:
+            print(f"Something went wrong with this string: {string}.")
+            return string
+
     # Many bibtex items start with the local reference name enclosed within the '{}'
-    # brackets. If they do start with '{' we can remove it immediatelly
+    # brackets or some other text within '[]' brackets
+    # What we do here is run '{}' removal and then '[]' removal
+    # or run '[]' removal and then '{}' removal
     if bibitem[0] == "{":
-        i = 1
-        while bibitem[i] != "}":
-            i += 1
-        bibitem = bibitem[i:]
+        bibitem = remove_from_beggining("{", "}", bibitem)
+        bibitem = remove_from_beggining("[", "]", bibitem)
+    elif bibitem[0] == "[":
+        bibitem = remove_from_beggining("[", "]", bibitem)
+        bibitem = remove_from_beggining("{", "}", bibitem)
 
     # Clean up latex items like \em{} etc
     pattern = re.compile(r"\\[A-z]+{")
@@ -920,10 +957,14 @@ def clean_up_bibtex(bibitem: str) -> str:
     pattern = re.compile(r"\n")
     bibitem = re.sub(pattern, "", bibitem)
     # Clean up simple characters: {}[]
-    reduntant_characters = r"{}[]\"'"
+    reduntant_characters = r"{}[]\"'%"
     bibitem = bibitem.translate(
         {ord(char): None for char in reduntant_characters}
     ).strip()
+    # Remove the weird ~ symbol
+    # I have no idea what it is even used for in bibtex
+    # Replace with whitespace though
+    bibitem = bibitem.translate({"~": " "})
     # Remove reduntant white space
     pattern = re.compile(r"\s{2,}")
     bibitem = re.sub(pattern, " ", bibitem)
@@ -935,6 +976,10 @@ time1 = time.time()
 create_database()
 time2 = time.time()
 print(f"It took me {time2-time1:.2f}s to process a 100 papers.")
+print(f"This is equal to {(time2-time1)/3600:.2f} hours.")
+print(
+    f"At this rate, it would take me {(time2-time1)/3600*20:.2f} hours to process 2000 papers."
+)
 
 # print(check_doi_registration_agency("10.1109/TAC.2018.2876389"))
 # print(crossref_metadata_from_doi("10.1109/TAC.2018.2876389"))
