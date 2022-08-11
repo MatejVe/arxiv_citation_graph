@@ -9,7 +9,6 @@ import urllib.error
 import urllib.request
 import chardet
 import time
-from copy import deepcopy
 
 import feedparser
 from habanero import Crossref
@@ -170,13 +169,18 @@ class AttrDict(dict):
 FIELDS_TO_STORE = [
     "paper_id",
     "reference_num",
-    "id_type",
-    "reference_id",
+    "ref_arxiv_id",
+    "DOI",
     "title",
+    "abstract",
     "authors",
-    "URL",
-    "published",
-    "summary",
+    "database_name",
+    "last_modified_datetime",
+    "created_datetime",
+    "authors_linked",
+    "authors_linked_short",
+    "pdf_link",
+    "source_link",
     "arxiv_comment",
     "arxiv_primary_category",
     "type",
@@ -184,8 +188,8 @@ FIELDS_TO_STORE = [
     "score",
     "length_of_bibitem",
     "time_taken",
-    "clean_bibitem",
     "bibitem",
+    "clean_bibitem",
 ]
 values = ["null"] * len(FIELDS_TO_STORE)
 
@@ -417,11 +421,11 @@ def get_citations(list_of_files):
                     if results_doi:
                         # for some reason it comes back in a list
                         results_doi = results_doi[0]
-                        print(f"Found a DOI.")
-                        try:  # In come cases the extracted DOI is faulty and will return an error
-                            if check_doi_registration_agency(results_doi) == "Crossref":
-                                md = crossref_metadata_from_doi(results_doi)
-                        except:
+                        print(f"Found a DOI: {results_doi}")
+                        # In come cases the extracted DOI is faulty and will return an error
+                        if check_doi_registration_agency(results_doi) == "Crossref":
+                            md = crossref_metadata_from_doi(results_doi)
+                        else:
                             print(f"DOI couldn't be resolved, querying CrossRef.")
                             md = crossref_metadata_from_query(clean_bibitem)
 
@@ -553,14 +557,17 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
     the items of interest.
 
     Metadata that we are currently interested in:
-        arxiv_id,
-        title,
-        authors,
-        link,
-        published,
-        summary,
-        arxiv_comment,
+        title
+        arxiv_comment
+        summary
+        id
+        arxiv_doi
+        updated
+        published
+        authors
+        links
         arxiv_primary_category
+        arxiv_journal_ref
 
     Additionally, we store time_taken which is the amount of time
     taken to get a response from the API
@@ -573,18 +580,24 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
                 interested in above
     """
     WHAT_GETS_ASSIGNED_HERE = [
-        "reference_id",
-        "id_type" "title",
+        "ref_arxiv_id",
+        "DOI",
+        "title",
+        "abstract",
         "authors",
-        "URL",
-        "published",
-        "summary",
+        "database_name",
+        "last_modified_datetime",
+        "created_datetime",
+        "pdf_link",
+        "source_link",
         "arxiv_comment",
         "arxiv_primary_category",
+        "type",
+        "container"
         "time_taken",
     ]
 
-    SIMPLE_EXTRACT = ["title", "summary", "arxiv_comment"]
+    SIMPLE_EXTRACT = ["title", "arxiv_comment"]
 
     base_url = "http://export.arxiv.org/api/query?"
 
@@ -599,7 +612,9 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
 
     metadata = create_default_md_dict(FIELDS_TO_STORE)
 
-    metadata["id_type"] = "arxiv_ID"
+    metadata['database_name'] = "arxiv"
+    metadata["source_link"] = "https://arxiv.org/"
+    metadata["type"] = "journal-article"
     # Extract the simple entries
     for item in SIMPLE_EXTRACT:
         try:
@@ -607,16 +622,31 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
         except Exception as e:
             print(f"Something went wrong when extracting {item}. Exception: {e}")
 
+    try:
+        metadata["abstract"] = entry["summary"]
+    except Exception as e:
+        print(f"Something went wrong when extracting summary. Exceptio {e}.")
+
     # Extract entries that require some postprocessing
     try:
-        metadata["reference_id"] = entry.id.split("/abs/")[-1]
+        metadata["ref_arxiv_id"] = entry.id.split("/abs/")[-1]
     except Exception as e:
         print(f"Something went wrong when extracting reference_id. Exception: {e}")
 
     try:
-        metadata["published"] = entry["published"].split("-")[0]
+        metadata["DOI"] = entry["arxiv_doi"]
     except Exception as e:
-        print(f"Something went wrong when extracting published. Exception: {e}")
+        print(f"Something went wrong when extracting doi. Exception {e}")
+
+    try:
+        metadata["last_modified_datetime"] = entry["updated"].split("T")[0]
+    except:
+        print(f"Something went wrong when extracting last modified datetime. Exception: {e}")
+
+    try:
+        metadata["created_datetime"] = entry["published"].split("T")[0]
+    except Exception as e:
+        print(f"Something went wrong when extracting creation datetime. Exception: {e}")
 
     try:
         authors = entry["authors"]
@@ -627,9 +657,9 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
     try:
         for link in entry.links:
             if link.rel == "alternate":
-                metadata["URL"] = link.href
+                metadata["pdf_link"] = link.href
     except Exception as e:
-        print(f"Something went wrong when extracting URL. Exception: {e}")
+        print(f"Something went wrong when extracting pdf link. Exception: {e}")
 
     try:
         metadata["arxiv_primary_category"] = entry["arxiv_primary_category"]["term"]
@@ -637,6 +667,11 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
         print(
             f"Something went wrong when extracting arxiv_primary_category. Exception: {e}"
         )
+    
+    try:
+        metadata["container"] = entry["arxiv_journal_ref"]
+    except Exception as e:
+        print(f"Couldnt get container. Exception {e}")
 
     metadata["time_taken"] = time2 - time1
 
@@ -689,8 +724,10 @@ def crossref_metadata_from_doi(doi: str) -> dict:
         DOI
         title
         author
-        URL
+        created
         published
+        URL
+        publisher
         type
         container
 
@@ -714,16 +751,17 @@ def crossref_metadata_from_doi(doi: str) -> dict:
                 above
     """
     WHAT_GETS_ASSIGNED = [
-        "id_type" "reference_id",
+        "DOI",
         "title",
         "authors",
-        "URL",
-        "published",
+        "last_modified_datetime",
+        "created_datetime",
+        "pdf_link",
+        "source_link (we take the publisher)",
         "type",
         "container",
         "time_taken",
     ]
-    SIMPLE_EXTRACT = ["URL", "type"]
 
     time1 = time.time()
     # cr = Crossref(mailto="matejvedak@gmail.com")
@@ -732,19 +770,12 @@ def crossref_metadata_from_doi(doi: str) -> dict:
     time2 = time.time()
 
     metadata = create_default_md_dict(FIELDS_TO_STORE)
-    metadata["id_type"] = "DOI"
-    # Extract simple entries
-    for item in SIMPLE_EXTRACT:
-        try:
-            metadata[item] = work[item]
-        except Exception as e:
-            print(f"Something went wrong when extracting {item}. Exception: {e}")
 
     # Extract entries that require some postprocessing
     try:
-        metadata["reference_id"] = work["DOI"]
+        metadata["DOI"] = work["DOI"]
     except Exception as e:
-        print(f"Something went wrong when extracting reference id. Exception: {e}")
+        print(f"Something went wrong when extracting DOI. Exception: {e}")
 
     try:
         # Need [0] because for some reason the title comes back in a list
@@ -774,10 +805,33 @@ def crossref_metadata_from_doi(doi: str) -> dict:
     except Exception as e:
         print(f"Something went wrong when extracting author. Exception: {e}")
 
-    try:
-        metadata["published"] = work["published"]["date-parts"][0][0]
+    try: # work["created"]["date-time"] seems like something most similar to last modified
+        # I'm not entirely sure as to what "created" stands for
+        # Since there is a difference key called "deposited" which is probably
+        # the date when the entry was deposited to crossref
+        metadata["last_modified_datetime"] = work["created"]["date-time"].split("T")[0]
     except Exception as e:
-        print(f"Something went wrong when extracting published. Exception: {e}")
+        print(f"Something went wrong when extracting created datetime. Exception: {e}")
+
+    try:
+        metadata["created_datetime"] = '-'.join(work["published"]["date-parts"][0])
+    except Exception as e:
+        print(f"Something went wrong when extracting publishing date. Exception {e}")
+
+    try:
+        metadata["pdf_link"] = work["URL"]
+    except Exception as e:
+        print(f"Couldnt get the link. Exception {e}")
+
+    try:
+        metadata["source_link"] = work["publisher"]
+    except Exception as e:
+        print(f"Couldnt get the publisher")
+
+    try:
+        metadata["type"] = work["type"]
+    except Exception as e:
+        print(f"Couldnt get the type. Exception {e}")
 
     try:
         metadata["container"] = work["container-title"][0]
@@ -805,8 +859,10 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
         DOI,
         title,
         authors,
-        URL,
+        created,
         published,
+        URL,
+        publisher,
         type,
         container,
         score
@@ -834,13 +890,14 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
         "DOI",
         "title",
         "authors",
-        "URL",
-        "published",
+        "last_modified_datetime",
+        "created_datetime",
+        "pdf_link",
+        "source_link",
         "type",
         "container",
         "score",
     ]
-    SIMPLE_EXTRACT = ["URL", "type", "score"]
 
     time1 = time.time()
     # cr = Crossref(mailto="matejvedak@gmail.com")
@@ -853,27 +910,16 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
     if x["message"]["items"]:
         bestItem = x["message"]["items"][0]
 
-        metadata["id_type"] = "DOI"
         try:
-            metadata["reference_id"] = bestItem["DOI"]
+            metadata["DOI"] = bestItem["DOI"]
         except Exception as e:
-            print(f"Something went wrong when extracting {item}. Exception: {e}")
+            print(f"Something went wrong when extracting DOI. Exception: {e}")
 
-        # Extract the simple items
-        for item in SIMPLE_EXTRACT:
-            try:
-                metadata[item] = bestItem[item]
-            except Exception as e:
-                print(f"Something went wrong when extracting {item}. Exception: {e}")
-
-        # Extract the items that require postprocessing
         try:
             metadata["title"] = bestItem["title"][0]
         except Exception as e:
             print(f"Something went wrong when extracting title. Exception: {e}")
 
-        # TODO: replace all the try except blocks with .get() method
-        # where applicable of course
         try:
             authors = bestItem["author"]
             givenNames = []
@@ -897,14 +943,36 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
             print(f"Something went wrong when extracting author. Exception: {e}")
 
         try:
-            metadata["published"] = bestItem["published"]["date-parts"][0][0]
+            metadata["last_modified_datetime"] = bestItem["created"]["date-time"].split('T')[0]
         except Exception as e:
             print(f"Something went wrong when extracting published. Exception: {e}")
+
+        try:
+            metadata["created_datetime"] = '-'.join(bestItem["published"]["date-parts"][0])
+        except Exception as e:
+            print(f"Couldnt grab publishing date. Exception {e}")
+
+        try:
+            metadata["pdf_link"] = bestItem["URL"]
+        except Exception as e:
+            print(f"Couldnt grab pdf link. Exception {e}")
+        
+        try:
+            metadata["source_link"] = bestItem["publisher"]
+        except Exception as e:
+            print(f"Couldnt grab the publisher to save as source link. Exception {e}")
+
+        try:
+            metadata["type"] = bestItem["type"]
+        except Exception as e:
+            print(f"Couldnt grab type. Exception {e}")
 
         try:
             metadata["container"] = bestItem["container-title"][0]
         except Exception as e:
             print(f"Something went wrong when extracting container. Exception: {e}")
+        metadata["score"] = bestItem["score"]
+
     metadata["time_taken"] = time2 - time1
 
     return metadata
@@ -973,7 +1041,7 @@ def clean_up_bibtex(bibitem: str) -> str:
 
 
 time1 = time.time()
-create_database()
+#create_database()
 time2 = time.time()
 print(f"It took me {time2-time1:.2f}s to process a 100 papers.")
 print(f"This is equal to {(time2-time1)/3600:.2f} hours.")
