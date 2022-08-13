@@ -166,6 +166,9 @@ class AttrDict(dict):
             super().__setitem__(key, value)
 
 
+# Fields that can be stored have to be initialized here
+# They are automatically filled with null, unless a non null
+# value is assigned somewhere else in the code
 FIELDS_TO_STORE = [
     "paper_id",
     "reference_num",
@@ -191,7 +194,6 @@ FIELDS_TO_STORE = [
     "bibitem",
     "clean_bibitem",
 ]
-values = ["null"] * len(FIELDS_TO_STORE)
 
 
 def create_default_md_dict(fields_to_store: list) -> AttrDict:
@@ -234,9 +236,6 @@ def create_database():
     Crossref specific:
         DOI, type, container, score
     """
-    COMMON_FIELDS = ["title", "author", "URL", "published"]
-    ARXIV_FIELDS = ["arxiv_id", "summary", "arxiv_comment", "arxiv_primary_category"]
-    CROSSREF_FIELDS = ["DOI", "type", "container", "score"]
     con = sqlite3.connect("clean.db")
     cur = con.cursor()
 
@@ -308,6 +307,9 @@ def get_file(paper_id):
 
 
 def retrieve_rawdata(url):
+    # TODO: remake this function
+    # don't wait as long for a response, just keep going
+    # or rather, create a special retrieve_data for crossref xml that doesn't wait
     """
     This function gets the data from a web location and returns the
     raw data
@@ -371,6 +373,12 @@ def unpack_rawdata(rawdata, filename):
 
 def get_citations(list_of_files):
     """
+    TODO: give the user the option of choice
+        1. utilize crossref REST API
+        2. utilize crossref XML API
+        3. utilize neither, skip references that have no identifier
+    """
+    """
     This function starts with a list of files which could contain
     citation information and returns a list of arxiv_ids
     """
@@ -405,9 +413,7 @@ def get_citations(list_of_files):
                     # Since DOI is a strong identifier and the regex doesn't
                     # seem to be producing false positives we save the doi
                     results_doi = check_for_doi(bibitem)
-                    # TODO: rewrite this code logic when you think of something better
                     # next we do a strict arxiv id check
-                    # strict arxiv is reliable and if there is a strict arxiv id then save it
                     strict_arxiv_id = check_for_arxiv_id_strict(bibitem)
                     # finally do a flexible arxiv id check
                     flexible_arxiv_id = check_for_arxiv_id_flexible(bibitem)
@@ -1039,6 +1045,29 @@ def clean_up_bibtex(bibitem: str) -> str:
 
     return bibitem
 
+def create_query_batch_xml(clean_bibitems: list):
+    query_metadata = r"""<?xml version = "1.0" encoding="UTF-8"?>"""
+    schema_specs = r"""<query_batch xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.0" xmlns="http://www.crossref.org/qschema/2.0" xsi:schemaLocation="http://www.crossref.org/qschema/2.0 http://www.crossref.org/qschema/crossref_query_input2.0.xsd">"""
+    head = r"""<head>
+                    <email_address>matejvedak@gmail.com</email_address>
+                    <doi_batch_id>01032012</doi_batch_id>
+                </head>"""
+    queries = []
+    for i in range(len(clean_bibitems)):
+        query = """<query key="q{}" enable-multiple-hits="false" forward-match="false"><unstructured_citation>{}</unstructured_citation></query>""".format(
+            i + 1, clean_bibitems[i]
+        )
+        queries.append(query)
+    queries = "".join(queries)
+    xml_query = (
+        query_metadata
+        + schema_specs
+        + head
+        + "<body>"
+        + queries
+        + "</body></query_batch>"
+    )
+    return urllib.parse.quote(xml_query.replace("\n", "").replace("    ", ""))
 
 time1 = time.time()
 #create_database()

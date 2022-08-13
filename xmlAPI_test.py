@@ -67,8 +67,163 @@ def create_query_batch_xml(clean_bibitems: list):
         + queries
         + "</body></query_batch>"
     )
-    return urllib.parse.quote(xml_query.replace("\n", "").replace("    ", ""))
+    return urllib.parse.quote(xml_query.replace("\n", "").replace("    ", "").replace("&", ""))
 
+
+# TODO: lots of these fields might not work a 100% because a list comes in the way
+# check for list an extract that way
+# TODO: find a common blueprint for all this
+def parse_xml_response(response):
+    root = untangle.parse(response)
+    results = root.crossref_result.query_result.body.query
+    for i, result in enumerate(results):
+        if result["status"] == "resolved":
+            print(result.doi.cdata)  # DOI
+            print(result.doi["type"])  # type of publication
+            # also possible 'book_content'
+            if (result.doi["type"] == "journal_article"):
+                article_data = result.doi_record.crossref.journal.journal_article
+                journal_data = result.doi_record.crossref.journal.journal_metadata
+                #title
+                print(article_data.titles.title.cdata)
+                #authors
+                authors = []
+                for item in article_data.contributors.person_name:
+                    authors.append(item.given_name.cdata + ' ' + item.surname.cdata)
+                print(', '.join(authors))
+                # URL
+                print(article_data.doi_data.resource.cdata)
+                # publication date
+                date = []
+                if isinstance(article_data.publication_date, list):
+                    for item in article_data.publication_date[0].children:
+                        date.append(item.cdata)
+                else:
+                    for item in article_data.publication_date.children:
+                        date.append(item.cdata)
+                print('-'.join(date))
+                # container
+                print(journal_data.full_title.cdata)
+            elif result.doi["type"] == "posted_content":
+                data = result.doi_record.crossref.posted_content
+                # title
+                print(data.titles.title.cdata)
+                # authors
+                authors = []
+                for item in data.contributors.person_name:
+                    authors.append(item.given_name.cdata + ' ' + item.surname.cdata)
+                print(', '.join(authors))
+                # URL
+                print(data.doi_data.resource.cdata)
+                # posted date
+                date = []
+                for item in data.posted_date.children:
+                    date.append(item.cdata)
+                print('-'.join(date))
+                # publisher/institution
+                print(data.institution.institution_name.cdata)
+            elif result.doi["type"] == "report-paper_title":
+                data = result.doi_record.crossref.report_paper.report_paper_metadata
+                #title
+                print(data.titles.title.cdata)
+                # authors
+                print(', '.join([name.given_name.cdata+' '+name.surname.cdata for name in data.contributors.person_name]))
+                # URL
+                print(data.doi_data.resource.cdata)
+                # publication date
+                date = []
+                for item in data.publication_date.children:
+                    date.append(item.cdata)
+                print('-'.join(date))
+                # publisher
+                print(data.publisher.publisher_name.cdata)
+            elif result.doi["type"] == "conference_paper":
+                paper_data = result.doi_record.crossref.conference.conference_paper
+                event_data = result.doi_record.crossref.conference.event_metadata
+                proceedings_data = result.doi_record.crossref.conference.proceedings_metadata
+
+                # title
+                print(paper_data.titles.title.cdata)
+                #authors
+                authors = []
+                for name in paper_data.contributors.person_name:
+                    name = name.given_name.cdata + ' ' + name.surname.cdata
+                    authors.append(name)
+                print(', '.join(authors))
+                # publication date
+                date = []
+                for item in paper_data.publication_date.children:
+                    date.append(item.cdata)
+                print('-'.join(date))
+                # URL
+                print(paper_data.doi_data.resource.cdata)
+                # container
+                print(event_data.conference_name.cdata)
+                # publisher
+                print(proceedings_data.publisher.publisher_name.cdata)
+            elif result.doi["type"] == "book_content":
+                content_data = result.doi_record.crossref.book.content_item
+                # this one has same fields as the type "book_title, can extract the same thing"
+                try:
+                    book_data = result.doi_record.crossref.book.book_metadata
+                except:
+                    book_data = result.doi_record.crossref.book.book_series_metadata
+
+                # title
+                print(content_data.titles.title.cdata)
+                # authors
+                authors = []
+                for name in content_data.contributors.person_name:
+                    name = name.given_name.cdata + ' ' + name.surname.cdata
+                    authors.append(name)
+                print(', '.join(authors))
+                # publication date
+                date = []
+                for item in book_data.publication_date.children:
+                    date.append(item.cdata)
+                print('-'.join(date))
+                # URL
+                print(content_data.doi_data.resource.cdata)
+                # publisher
+                print(book_data.publisher.publisher_name.cdata)
+            elif result.doi["type"] == "book_title":
+                name = result.doi_record.crossref.book.children[0]._name
+                data = result.doi_record.crossref.book.get_elements(name=name)[0]
+                # title
+                print(data.titles.title.cdata)
+                # authors
+                authors = []
+                for name in data.contributors.person_name:
+                    name = name.given_name.cdata + ' ' + name.surname.cdata
+                    authors.append(name)
+                print(', '.join(authors))
+                # URL
+                print(data.doi_data.resource.cdata)
+                # print publication date
+                publication_date = []
+                if isinstance(data.publication_date, list):
+                    # TODO: improve this to grab the actual publication date
+                    # not just the first date (although this is usualy the publication date)
+                    for item in data.publication_date[0].children:
+                        publication_date.append(item.cdata)
+                else:
+                    for item in data.publication_date.children:
+                        publication_date.append(item.cdata)
+                print('-'.join(publication_date))
+                # online publication date - often isn't contained at all
+                # print('-'.join([el.cdata for el in data.publication_date[1].children]))
+                # publisher
+                print(data.publisher.publisher_name.cdata)
+            else:
+                print("WARNING: unknown result type")
+        elif result["status"] == "unresolved":
+            print("Couldnt resolve reference")
+            #print(result.article_title.cdata)
+            #print(result.author.cdata)
+            #print(result.journal_title.cdata)
+            #print(result.year.cdata)
+        else:
+            raise Exception(f"Something unexpected happened with {references[i]}.")
 
 xml_query = r"""
 <?xml version = "1.0" encoding="UTF-8"?>
@@ -89,17 +244,14 @@ xml_query = r"""
 # TODO: for some reason some '&' break the query. Although, the query seems to work OK with just removing the '&' character
 # The manual says encode the '&' character as '%26' but that doesn't seem to work
 references = [
-    "Bretthorst, G.~L. 1988, Bayesian Spectrum Analysis and Parameter Estimation, ed. Berger,~J.,~Fienberg,~S.,~Gani,~J.,Krickenberg,~K., Singer, B. (Springer-Verlag, New York)",
-    "Hungate, B. A. (2012). Ecosystem services: Valuing ecosystems for climate. Nature Climate Change, 2(3), 151-152.",
+    "Luca Bertinetto, Jack Valmadre, Jo~ao~F Henriques, Andrea Vedaldi, and Philip H.~S. Torr. Fully-convolutional siamese networks for object tracking. In the European Conference on Computer Vision (ECCV) Workshops, 2016.",
+    "Berndt, J., Console, S. and Olmos, C., Submanifoldsand holonomy, Research Notes in Mathematics 434, Chapman &Hall/CRC, 2003.",
 ]
 xml_query = create_query_batch_xml(references)
 
 response = retrieve_rawdata(base_url + xml_query).decode()
-# print(response)
-# response = response.replace(" ", "").replace("\n", "").replace("\r", "")
-# print(response)
-root = untangle.parse(response)
-results = root.crossref_result.query_result.body.query
+
+parse_xml_response(response)
 
 """
 Having processed all the bibitems here are the found types and sample bibitem
@@ -112,63 +264,3 @@ posted_content: M.~Sesia, E.~Katsevich, S.~Bates, E.~Cand, and C.~Sabatti. Multi
 
 2/3 of bibitems get sucessfully resolved, a third is left unresolved
 """
-
-if results[0]["status"] == "resolved":
-    print(results[0].doi.cdata)  # DOI
-    print(results[0].doi["type"])  # type of publication
-    # also possible 'book_content'
-    if (
-        results[0].doi["type"] == "journal-article"
-        or results[0].doi["type"] == "journal_article"
-    ):
-        print(
-            results[0].doi_record.crossref.journal.journal_article.titles.title.cdata
-        )  # title
-        print(
-            results[0].doi_record.crossref.journal.journal_article.contributors
-        )  # authors
-        # The following can also be collection.item[0].resource.cdata
-        print(
-            results[0]
-            .doi_record.crossref.journal.journal_article.doi_data.collection[0]
-            .item.resource.cdata
-        )  # URL
-        # might not be a list, might just be publication_date.year.cdata
-        print(
-            results[0]
-            .doi_record.crossref.journal.journal_article.publication_date[0]
-            .year.cdata
-        )  # published
-        print(
-            results[0].doi_record.crossref.journal.journal_metadata.full_title.cdata
-        )  # Container name
-    elif results[0].doi["type"] == "book_title":
-        print(
-            results[0].doi_record.crossref.book.book_series_metadata.titles.title.cdata
-        )  # title
-        print(
-            results[0].doi_record.crossref.book.book_series_metadata.contributors
-        )  # authors
-        print(
-            results[
-                0
-            ].doi_record.crossref.book.book_series_metadata.doi_data.resource.cdata
-        )  # URL
-        # TODO: check this publication data, might be a list or it might be a single entry publication_date.year.cdata
-        print(
-            results[0]
-            .doi_record.crossref.book.book_series_metadata.publication_date[0]
-            .year.cdata
-        )  # published
-        print(
-            results[
-                0
-            ].doi_record.crossref.book.book_series_metadata.series_metadata.titles.title.cdata
-        )  # container name
-elif results[0]["status"] == "unresolved":
-    print(results[0].article_title.cdata)
-    print(results[0].author.cdata)
-    print(results[0].journal_title.cdata)
-    print(results[0].year.cdata)
-else:
-    raise Exception(f"Something unexpected happened with {references[0]}.")
