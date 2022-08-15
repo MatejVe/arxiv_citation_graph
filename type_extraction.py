@@ -125,9 +125,11 @@ while i < len(bibitems) - bibitemsNum:
         deniedBibitems += bibs
         i += bibitemsNum
         bibitemsNum -= 1
-    
+
     if bibitemsNum == 0:
-        print(f'WARNING: kept getting 504 responses even for queries of 1 bibitem. Breaking')
+        print(
+            f"WARNING: kept getting 504 responses even for queries of 1 bibitem. Breaking"
+        )
         break
 
     j += 1
@@ -144,7 +146,9 @@ print(
 print(
     f"{(endTime-startTime)/3600:.2f} hours to retrieve data for {len(bibitems) - len(deniedBibitems)} bibitems."
 )
-print(f'This is a speed of {(endTime-startTime)/(len(bibitems))} s per reference, taking in mind that {len(deniedBibitems)} have not been processed.')
+print(
+    f"This is a speed of {(endTime-startTime)/(len(bibitems))} s per reference, taking in mind that {len(deniedBibitems)} have not been processed."
+)
 
 plt.scatter(lens, times)
 plt.xlabel("Bibitems length")

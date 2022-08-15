@@ -84,7 +84,7 @@ cur.execute("CREATE TABLE XML_api_speed (time_of_day, return_time, error_code)")
 # Request a response for the test_bibitems every every 5 minutes; repeat for 24 hours
 # this comes out to a 288 request, each one happening every 5 minutes
 for i in range(1440):
-    print(f'Query number {i+1} of 1440. {(i+1)/1440 * 100:.2f}%.')
+    print(f"Query number {i+1} of 1440. {(i+1)/1440 * 100:.2f}%.")
     time1 = time.time()
     now = datetime.now()
     current_time = now.strftime("%H:%M:%S")
@@ -98,8 +98,8 @@ for i in range(1440):
         print(f"Ignoring")
     time2 = time.time()
     deltaT = time2 - time1
-    print(f'Time of day is {current_time}, took me {deltaT:.2f}s to get data.')
-    print(f'Is there an error? {error}')
+    print(f"Time of day is {current_time}, took me {deltaT:.2f}s to get data.")
+    print(f"Is there an error? {error}")
     cur.execute(
         "INSERT INTO XML_api_speed VALUES (?, ?, ?)", (current_time, deltaT, error)
     )

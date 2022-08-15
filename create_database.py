@@ -12,6 +12,7 @@ import time
 
 import feedparser
 from habanero import Crossref
+import untangle
 
 from arxiv_regex.arxiv_regex import *
 
@@ -172,6 +173,7 @@ class AttrDict(dict):
 FIELDS_TO_STORE = [
     "paper_id",
     "reference_num",
+    "status",
     "ref_arxiv_id",
     "DOI",
     "title",
@@ -201,7 +203,7 @@ def create_default_md_dict(fields_to_store: list) -> AttrDict:
     return AttrDict(zip(FIELDS_TO_STORE, values))
 
 
-def create_database():
+def create_database(dbname):
     """
     This function takes the arxiv ids above, downloads the files for this
     paper (get_file), and extracts the citations (get_citations)
@@ -236,12 +238,12 @@ def create_database():
     Crossref specific:
         DOI, type, container, score
     """
-    con = sqlite3.connect("clean.db")
+    con = sqlite3.connect(dbname)
     cur = con.cursor()
 
     cur.execute("CREATE TABLE reference_tree ({})".format(",".join(FIELDS_TO_STORE)))
 
-    for i, paper_id in enumerate(list_of_paper_ids):
+    for i, paper_id in enumerate(test_paper):
         print("process paper %s, %d" % (paper_id, i))
         filename, list_of_files = get_file(paper_id)
         if list_of_files:
@@ -257,8 +259,10 @@ def create_database():
                     "bibitem",
                 ]
                 md["paper_id"] = paper_id
+                # reference number will unfortunately get messed up
+                # it won't be the same as the reference number in the paper
                 md["reference_num"] = i + 1
-                md["length_of_bibitem"] = len(bibitems[i])
+                md["length_of_bibitem"] = len(clean_bibitems[i])
                 md["clean_bibitem"] = clean_bibitems[i]
                 md["bibitem"] = bibitems[i]
 
@@ -371,7 +375,7 @@ def unpack_rawdata(rawdata, filename):
     return
 
 
-def get_citations(list_of_files):
+def get_citations(list_of_files, mode="xmlAPI", additionalArg=None):
     """
     TODO: give the user the option of choice
         1. utilize crossref REST API
@@ -381,6 +385,37 @@ def get_citations(list_of_files):
     """
     This function starts with a list of files which could contain
     citation information and returns a list of arxiv_ids
+
+    Args:
+        mode: restAPI, xmlAPI, neither
+
+        restAPI will query crossref REST API for any reference
+        that has no identifier within. 
+        REST API has two types of servers: public pool and polite pool
+        Request is handled by the public pool if no email is provided.
+        This turned out to be quite fast, between 1s and 3s per reference.
+        Request is handled by the polite pool if an email is provided.
+        For some reason this takes much longer. Up to 10s per reference.
+        Advantage of the polite pool is that crossref authors will send you an
+        email if your script is behaving in a manner they don't like. 
+        With the public pool, you might simply be banned from accessing their
+        services.
+        Put your email in the additionalArg argument to get access to the polite
+        pool.
+
+        XML API will query crossref XML API with references that have no identifier
+        within. The difference between XML API and REST API is that the XML API can
+        fail to identify a reference - there is not scoring system. In case the reference
+        couldn't be resolved, its bibtex will be saved with a tag 'unresolved'.
+        These unresolved references can later be ran through the REST API or parsed
+        with some custom built NLP parses, or whatever other method can be thought of.
+        additionalArg parameter needs to be an integer that specifies how many references
+        at a time are requested from the XML server.
+
+        neither option will simply skip all the unrecognized references. Only those with
+        an arxiv id or a DOI will be recognized and their metadata extracted. Rest of the
+        references will be saved within the same database (fields of paper_id, reference_num,
+        status, bibitem, clean_bibitem will be populated). Status field will be 'ignored'.
     """
     citations = []
     clean_bibitems = []
@@ -403,12 +438,16 @@ def get_citations(list_of_files):
             # Strip the empty spaces
             list_of_bibitems = [item.strip() for item in list_of_bibitems]
             print(f"Found {len(list_of_bibitems)} references.")
+            list_of_clean_bibitems = [clean_up_bibtex(bib) for bib in list_of_bibitems]
 
+            identifiers = []
             for i, bibitem in enumerate(list_of_bibitems):
                 print(f"Processing reference number {i}.")
-                # Some bibitems come out just as '{}' for examle
+                # Some bibitems come out just as '{}' for example ('stop[0]{}%')
                 # We don't process these as it is obviously a faulty reference
-                if len(bibitem) > 4:
+                if len(bibitem) > 30:  # after processing all the test papers
+                    # 30 was the limit above which actual
+                    # references appeared
                     # for each citation check whether there is an doi tag
                     # Since DOI is a strong identifier and the regex doesn't
                     # seem to be producing false positives we save the doi
@@ -417,45 +456,127 @@ def get_citations(list_of_files):
                     strict_arxiv_id = check_for_arxiv_id_strict(bibitem)
                     # finally do a flexible arxiv id check
                     flexible_arxiv_id = check_for_arxiv_id_flexible(bibitem)
-
                     # cleaned bibitems are used to query crossref
                     # hope it increases performance
-                    clean_bibitem = clean_up_bibtex(bibitem)
+                    clean_bibitem = list_of_clean_bibitems[i]
                     bibitems.append(bibitem)
                     clean_bibitems.append(clean_bibitem)
-
                     if results_doi:
                         # for some reason it comes back in a list
                         results_doi = results_doi[0]
                         print(f"Found a DOI: {results_doi}")
-                        # In come cases the extracted DOI is faulty and will return an error
-                        if check_doi_registration_agency(results_doi) == "Crossref":
-                            md = crossref_metadata_from_doi(results_doi)
-                        else:
-                            print(f"DOI couldn't be resolved, querying CrossRef.")
-                            md = crossref_metadata_from_query(clean_bibitem)
-
+                        identifiers.append((i, results_doi, "DOI"))
                     elif strict_arxiv_id:
                         strict_arxiv_id = clean_arxiv_id(strict_arxiv_id[0])
                         print(f"Found an arXiv ID (strict) {strict_arxiv_id}.")
-                        md = arxiv_metadata_from_id(strict_arxiv_id)
-
+                        identifiers.append((i, strict_arxiv_id, "arxivID"))
                     elif flexible_arxiv_id:
                         flexible_arxiv_id = clean_arxiv_id(flexible_arxiv_id[0])
                         print(f"Found an arXiv ID (flexible) {flexible_arxiv_id}.")
-                        md = arxiv_metadata_from_id(flexible_arxiv_id)
-
+                        identifiers.append((i, flexible_arxiv_id, "arxivID"))
                     else:
-                        # If all of these methods fail we need to utilize some other method
-                        # We use crossref and their reference matching system
-                        # See https://www.crossref.org/categories/reference-matching/#:~:text=Matching%20(or%20resolving)%20bibliographic%20references,indexes%2C%20impact%20factors%2C%20etc.
-                        time1 = time.time()
-                        md = crossref_metadata_from_query(clean_bibitem)
-                        time2 = time.time()
-                        print(
-                            f"Resorted to CrossRef, time taken to retrieve metadata: {time2-time1:.2f}s"
+                        print("No identifier could be found.")
+                        identifiers.append((i, None, None))
+
+            # We have identifiers now and can extract metadata depending on the
+            # mode parameter
+            if mode == "restAPI":
+                # TODO: this type of extraction allows for easy speeding up
+                # we could easily first create lists of items depending on the 'tip'
+                # and then, instead of one by one, query all arxivIDs at once, and all
+                # DOIs at once
+                for num, ident, tip in identifiers:
+                    if tip == "DOI":
+                        if check_doi_registration_agency(ident) == "Crossref":
+                            md = crossref_metadata_from_doi(ident)
+                        else:
+                            md = crossref_metadata_from_query(
+                                clean_bibitems[num], threshold=0, email=additionalArg
+                            )
+                    elif tip == "arxivID":
+                        md = arxiv_metadata_from_id(ident)
+                    else:
+                        md = crossref_metadata_from_query(
+                            list_of_clean_bibitems[num],
+                            threshold=0,
+                            email=additionalArg,
                         )
                     citations.append(md)
+            elif mode == "xmlAPI":
+                dois = []
+                arxivIDs = []
+                rest = []
+                for ident in identifiers:
+                    if ident[2] == "DOI":
+                        dois.append(ident)
+                    elif ident[2] == "arxivID":
+                        arxivIDs.append(ident)
+                    else:
+                        rest.append(ident)
+                for num, ident, tip in dois:
+                    if check_doi_registration_agency(ident) == "Crossref":
+                        md = crossref_metadata_from_doi(ident)
+                    else:  # still utilize rest API here
+                        md = crossref_metadata_from_query(
+                            clean_bibitems[num], threshold=0, email=None
+                        )
+                    citations.append((num, md))
+                for num, ident, tip in arxivIDs:
+                    md = arxiv_metadata_from_id(ident)
+                    citations.append((num, md))
+                xmlbibs = [list_of_clean_bibitems[item[0]] for item in rest]
+                numbers = [item[0] for item in rest]
+                data = []
+                bibitemsNum = 5 if additionalArg is None else additionalArg
+                user_email = "matejvedak@gmail.com"
+                response_format = "unixsd"  # can be unixref as well
+                base_url = "https://doi.crossref.org/servlet/query?usr={usermail}&format={format}&qdata=".format(
+                    usermail=user_email, format=response_format
+                )
+                i = 0
+                j = 0
+                while i < len(xmlbibs) - bibitemsNum:
+                    print(
+                        f"Processing batch number {j} - bibs {i} through {i+bibitemsNum}."
+                    )
+                    xml_query = create_query_batch_xml(xmlbibs[i : i + bibitemsNum])
+                    response = retrieve_rawdata(base_url + xml_query).decode()
+                    results = parse_xml_response(response)
+                    data += [extract_metadata_from_xml(res) for res in results]
+                    i += bibitemsNum
+                    j += 1
+                # Final batch
+                xml_query = create_query_batch_xml(xmlbibs[i:])
+                response = retrieve_rawdata(base_url + xml_query).decode()
+                results = parse_xml_response(response)
+                data += [extract_metadata_from_xml(res) for res in results]
+                # Add this data to the citations
+                for datum, num in zip(data, numbers):
+                    citations.append((num, datum))
+                # sort the citations by num
+                citations.sort(key=lambda elem:elem[0])
+                # Only take metadata dictionaries
+                citations = [item[1] for item in citations]
+                # TODO: add here an option of processing the unresolved references through
+                # the REST API, or, again, can implement some sort of NLP here
+            elif mode == "neither":
+                for num, ident, tip in identifiers:
+                    if tip == "DOI":
+                        if check_doi_registration_agency(ident) == "Crossref":
+                            md = crossref_metadata_from_doi(ident)
+                        else:
+                            md = crossref_metadata_from_query(
+                                clean_bibitems[num], threshold=0, email=additionalArg
+                            )
+                    elif tip == "arxivID":
+                        md = arxiv_metadata_from_id(ident)
+                    else:
+                        md = create_default_md_dict(FIELDS_TO_STORE)
+                        md["status"] = "ignored"
+                    citations.append(md)
+                # TODO: can implement here some sort of NLP to proces the ignored references
+                # OR create a completely different script that takes ignored references from storage
+
     return citations, clean_bibitems, bibitems
 
 
@@ -539,8 +660,8 @@ def check_for_arxiv_id_flexible(citation: str) -> list[str]:
 def clean_arxiv_id(id: str) -> str:
     """
     Some references contain faulty arxiv ids. Example: arXiv:math.PR/0003156
-    '.PR' part breaks the lookup function. Subcategories can't be appended
-    to a category. This function cleans that up.
+    '.PR' part breaks the metadata extraction function. Subcategories can't be
+    appended to a category. This function cleans that up.
 
     Args:
         id (str): arxiv id that might contain faulty fields
@@ -586,6 +707,7 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
                 interested in above
     """
     WHAT_GETS_ASSIGNED_HERE = [
+        "status",
         "ref_arxiv_id",
         "DOI",
         "title",
@@ -599,7 +721,7 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
         "arxiv_comment",
         "arxiv_primary_category",
         "type",
-        "container"
+        "container",
         "time_taken",
     ]
 
@@ -618,7 +740,8 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
 
     metadata = create_default_md_dict(FIELDS_TO_STORE)
 
-    metadata['database_name'] = "arxiv"
+    metadata["status"] = "resolved"
+    metadata["database_name"] = "arxiv"
     metadata["source_link"] = "https://arxiv.org/"
     metadata["type"] = "journal-article"
     # Extract the simple entries
@@ -647,7 +770,9 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
     try:
         metadata["last_modified_datetime"] = entry["updated"].split("T")[0]
     except:
-        print(f"Something went wrong when extracting last modified datetime. Exception: {e}")
+        print(
+            f"Something went wrong when extracting last modified datetime. Exception: {e}"
+        )
 
     try:
         metadata["created_datetime"] = entry["published"].split("T")[0]
@@ -673,7 +798,7 @@ def arxiv_metadata_from_id(arxivID: str) -> dict:
         print(
             f"Something went wrong when extracting arxiv_primary_category. Exception: {e}"
         )
-    
+
     try:
         metadata["container"] = entry["arxiv_journal_ref"]
     except Exception as e:
@@ -720,7 +845,7 @@ def check_doi_registration_agency(doi: str) -> str:
     return cr.registration_agency(doi)[0]
 
 
-def crossref_metadata_from_doi(doi: str) -> dict:
+def crossref_metadata_from_doi(doi: str, email=None) -> dict:
     """
     Provided a valid doi this function will query the CrossRef API
     and parse the returned metadata. The function returns a dictionary
@@ -757,6 +882,7 @@ def crossref_metadata_from_doi(doi: str) -> dict:
                 above
     """
     WHAT_GETS_ASSIGNED = [
+        "status",
         "DOI",
         "title",
         "authors",
@@ -770,13 +896,16 @@ def crossref_metadata_from_doi(doi: str) -> dict:
     ]
 
     time1 = time.time()
-    # cr = Crossref(mailto="matejvedak@gmail.com")
-    cr = Crossref()
+    if email is not None:
+        cr = Crossref(mailto=email)
+    else:
+        cr = Crossref()
     work = cr.works(ids=doi)["message"]
     time2 = time.time()
+    print(f"Took me {time2-time1:.2f}s to get DOI metadata from Crossref.")
 
     metadata = create_default_md_dict(FIELDS_TO_STORE)
-
+    metadata["status"] = "resolved"
     # Extract entries that require some postprocessing
     try:
         metadata["DOI"] = work["DOI"]
@@ -811,7 +940,7 @@ def crossref_metadata_from_doi(doi: str) -> dict:
     except Exception as e:
         print(f"Something went wrong when extracting author. Exception: {e}")
 
-    try: # work["created"]["date-time"] seems like something most similar to last modified
+    try:  # work["created"]["date-time"] seems like something most similar to last modified
         # I'm not entirely sure as to what "created" stands for
         # Since there is a difference key called "deposited" which is probably
         # the date when the entry was deposited to crossref
@@ -820,7 +949,7 @@ def crossref_metadata_from_doi(doi: str) -> dict:
         print(f"Something went wrong when extracting created datetime. Exception: {e}")
 
     try:
-        metadata["created_datetime"] = '-'.join(work["published"]["date-parts"][0])
+        metadata["created_datetime"] = "-".join(work["published"]["date-parts"][0])
     except Exception as e:
         print(f"Something went wrong when extracting publishing date. Exception {e}")
 
@@ -849,7 +978,7 @@ def crossref_metadata_from_doi(doi: str) -> dict:
     return metadata
 
 
-def crossref_metadata_from_query(bibitem: str) -> dict:
+def crossref_metadata_from_query(bibitem: str, threshold=0, email=None) -> dict:
     """
     This is function that utilizes the habanero module to communicate with the
     crossref API. Given bibitem is processed on the crossref servers which try
@@ -858,6 +987,11 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
 
     One issue is that crossref will always try to match a work to a reference,
     so even if a reference doesn't exist crossref will find something.
+    To reject some references tune the threshold paramter.
+    By default, it is set to 0 so all references will match to something.
+    Out of personal experience, score of about 30 and higher is alright.
+    Although, to get a 100% recognition a score of about 60 or higher will
+    need to be utilized.
 
     The function returns a dictionary with the items we are interested in.
 
@@ -893,6 +1027,7 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
                 above
     """
     WHAT_GETS_ASSIGNED = [
+        "status",
         "DOI",
         "title",
         "authors",
@@ -906,16 +1041,22 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
     ]
 
     time1 = time.time()
-    # cr = Crossref(mailto="matejvedak@gmail.com")
-    cr = Crossref()
+    if email is not None:
+        cr = Crossref(mailto=email)
+    else:
+        cr = Crossref()
     x = cr.works(query_bibliographic=bibitem, limit=1)
     time2 = time.time()
+    print(f"It took me {time2-time1:.2f}s to query crossref and get metadata.")
 
     metadata = create_default_md_dict(FIELDS_TO_STORE)
 
-    if x["message"]["items"]:
-        bestItem = x["message"]["items"][0]
+    # if x["message"]["items"]:
+    bestItem = x["message"]["items"][0]
+    score = bestItem["score"]
 
+    if score > threshold:
+        metadata["status"] = "resolved"
         try:
             metadata["DOI"] = bestItem["DOI"]
         except Exception as e:
@@ -949,12 +1090,16 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
             print(f"Something went wrong when extracting author. Exception: {e}")
 
         try:
-            metadata["last_modified_datetime"] = bestItem["created"]["date-time"].split('T')[0]
+            metadata["last_modified_datetime"] = bestItem["created"]["date-time"].split(
+                "T"
+            )[0]
         except Exception as e:
             print(f"Something went wrong when extracting published. Exception: {e}")
 
         try:
-            metadata["created_datetime"] = '-'.join(bestItem["published"]["date-parts"][0])
+            metadata["created_datetime"] = "-".join(
+                [str(item) for item in bestItem["published"]["date-parts"][0]]
+            )
         except Exception as e:
             print(f"Couldnt grab publishing date. Exception {e}")
 
@@ -962,7 +1107,7 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
             metadata["pdf_link"] = bestItem["URL"]
         except Exception as e:
             print(f"Couldnt grab pdf link. Exception {e}")
-        
+
         try:
             metadata["source_link"] = bestItem["publisher"]
         except Exception as e:
@@ -978,6 +1123,8 @@ def crossref_metadata_from_query(bibitem: str) -> dict:
         except Exception as e:
             print(f"Something went wrong when extracting container. Exception: {e}")
         metadata["score"] = bestItem["score"]
+    else:
+        metadata["status"] = "unresolved"
 
     metadata["time_taken"] = time2 - time1
 
@@ -1045,7 +1192,11 @@ def clean_up_bibtex(bibitem: str) -> str:
 
     return bibitem
 
+
 def create_query_batch_xml(clean_bibitems: list):
+    """
+    TODO: add email parameter and chuck it into the head
+    """
     query_metadata = r"""<?xml version = "1.0" encoding="UTF-8"?>"""
     schema_specs = r"""<query_batch xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.0" xmlns="http://www.crossref.org/qschema/2.0" xsi:schemaLocation="http://www.crossref.org/qschema/2.0 http://www.crossref.org/qschema/crossref_query_input2.0.xsd">"""
     head = r"""<head>
@@ -1069,8 +1220,186 @@ def create_query_batch_xml(clean_bibitems: list):
     )
     return urllib.parse.quote(xml_query.replace("\n", "").replace("    ", ""))
 
+
+# TODO: lots of these fields might not work a 100% because a list comes in the way
+# check for list an extract that way
+# TODO: find a common blueprint for all this
+def extract_metadata_from_xml(singleresult):
+    """_summary_
+
+    Args:
+        singleresult (_type_): _description_
+    """
+    md = create_default_md_dict(FIELDS_TO_STORE)
+    if singleresult["status"] == "resolved":
+
+        md["status"] = "resolved"
+
+        md["DOI"] = singleresult.doi.cdata
+
+        md["type"] = singleresult.doi["type"]  # type of publication
+
+        if singleresult.doi["type"] == "journal_article":
+            article_data = singleresult.doi_record.crossref.journal.journal_article
+            journal_data = singleresult.doi_record.crossref.journal.journal_metadata
+
+            md["title"] = article_data.titles.title.cdata
+            # authors
+            authors = []
+            for item in article_data.contributors.person_name:
+                authors.append(item.given_name.cdata + " " + item.surname.cdata)
+            md["authors"] = ", ".join(authors)
+            # URL
+            md["source_link"] = article_data.doi_data.resource.cdata
+            # publication date
+            date = []
+            if isinstance(article_data.publication_date, list):
+                for item in article_data.publication_date[0].children:
+                    date.append(item.cdata)
+            else:
+                for item in article_data.publication_date.children:
+                    date.append(item.cdata)
+            md["created_datetime"] = "-".join(date)
+            # container
+            md["container"] = journal_data.full_title.cdata
+        elif singleresult.doi["type"] == "posted_content":
+            data = singleresult.doi_record.crossref.posted_content
+            # title
+            md["title"] = data.titles.title.cdata
+            # authors
+            authors = []
+            for item in data.contributors.person_name:
+                authors.append(item.given_name.cdata + " " + item.surname.cdata)
+            md["authors"] = ", ".join(authors)
+            # URL
+            md["source_link"] = data.doi_data.resource.cdata
+            # posted date
+            date = []
+            for item in data.posted_date.children:
+                date.append(item.cdata)
+            md["created_datetime"] = "-".join(date)
+            # publisher/institution
+            # print(data.institution.institution_name.cdata)
+        elif singleresult.doi["type"] == "report-paper_title":
+            data = singleresult.doi_record.crossref.report_paper.report_paper_metadata
+            # title
+            md["title"] = data.titles.title.cdata
+            # authors
+            authors = []
+            for item in data.contributors.person_name:
+                authors.append(item.given_name.cdata + " " + item.surname.cdata)
+            md["authors"] = ", ".join(authors)
+            # URL
+            md["source_link"] = data.doi_data.resource.cdata
+            # publication date
+            date = []
+            for item in data.publication_date.children:
+                date.append(item.cdata)
+            md["created_datetime"] = "-".join(date)
+            # publisher
+            md["container"] = data.publisher.publisher_name.cdata
+        elif singleresult.doi["type"] == "conference_paper":
+            paper_data = singleresult.doi_record.crossref.conference.conference_paper
+            event_data = singleresult.doi_record.crossref.conference.event_metadata
+            proceedings_data = (
+                singleresult.doi_record.crossref.conference.proceedings_metadata
+            )
+
+            # title
+            md["title"] = paper_data.titles.title.cdata
+            # authors
+            authors = []
+            for name in paper_data.contributors.person_name:
+                name = name.given_name.cdata + " " + name.surname.cdata
+                authors.append(name)
+            md["authors"] = ", ".join(authors)
+            # publication date
+            date = []
+            for item in paper_data.publication_date.children:
+                date.append(item.cdata)
+            md["created_datetime"] = "-".join(date)
+            # URL
+            md["source_link"] = paper_data.doi_data.resource.cdata
+            # container
+            md["container"] = event_data.conference_name.cdata
+            # publisher
+            # print(proceedings_data.publisher.publisher_name.cdata)
+        elif singleresult.doi["type"] == "book_content":
+            content_data = singleresult.doi_record.crossref.book.content_item
+            # this one has same fields as the type "book_title, can extract the same thing"
+            try:
+                book_data = singleresult.doi_record.crossref.book.book_metadata
+            except:
+                book_data = singleresult.doi_record.crossref.book.book_series_metadata
+
+            # title
+            md["title"] = content_data.titles.title.cdata
+            # authors
+            authors = []
+            for name in content_data.contributors.person_name:
+                name = name.given_name.cdata + " " + name.surname.cdata
+                authors.append(name)
+            md["authors"] = ", ".join(authors)
+            # publication date
+            date = []
+            for item in book_data.publication_date.children:
+                date.append(item.cdata)
+            md["created_datetime"] = "-".join(date)
+            # URL
+            md["source_link"] = content_data.doi_data.resource.cdata
+            # publisher
+            md["container"] = book_data.publisher.publisher_name.cdata
+        elif singleresult.doi["type"] == "book_title":
+            name = singleresult.doi_record.crossref.book.children[0]._name
+            data = singleresult.doi_record.crossref.book.get_elements(name=name)[0]
+            # title
+            md["title"] = data.titles.title.cdata
+            # authors
+            authors = []
+            for name in data.contributors.person_name:
+                name = name.given_name.cdata + " " + name.surname.cdata
+                authors.append(name)
+            md["authors"] = ", ".join(authors)
+            # URL
+            md["source_link"] = data.doi_data.resource.cdata
+            # print publication date
+            publication_date = []
+            if isinstance(data.publication_date, list):
+                # TODO: improve this to grab the actual publication date
+                # not just the first date (although this is usualy the publication date)
+                for item in data.publication_date[0].children:
+                    publication_date.append(item.cdata)
+            else:
+                for item in data.publication_date.children:
+                    publication_date.append(item.cdata)
+            md["created_datetime"] = "-".join(publication_date)
+            # online publication date - often isn't contained at all
+            # print('-'.join([el.cdata for el in data.publication_date[1].children]))
+            # publisher
+            md["container"] = data.publisher.publisher_name.cdata
+        else:
+            print(f"WARNING: unknown result type - {singleresult.doi['type']}")
+        return md
+    elif singleresult["status"] == "unresolved":
+        md["status"] = "unresolved"
+        print("Couldnt resolve reference")
+        # print(result.article_title.cdata)
+        # print(result.author.cdata)
+        # print(result.journal_title.cdata)
+        # print(result.year.cdata)
+        return md
+    else:
+        raise Exception(f"Something unexpected happened with {singleresult}.")
+
+
+def parse_xml_response(response):
+    root = untangle.parse(response)
+    results = root.crossref_result.query_result.body.query
+    return results
+
+
 time1 = time.time()
-#create_database()
+create_database("test.db")
 time2 = time.time()
 print(f"It took me {time2-time1:.2f}s to process a 100 papers.")
 print(f"This is equal to {(time2-time1)/3600:.2f} hours.")
@@ -1083,6 +1412,6 @@ print(
 # print(arxiv_metadata_from_id("1903.03180"))
 # print(
 #    crossref_metadata_from_query(
-#        "Wooldridge, J. M. (2009). On estimating firm-level production functions using proxy variables to control for unobservables. Economics Letters, 104(3):112–114."
+#        "Stop 0%"
 #    )
 # )
