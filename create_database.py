@@ -123,16 +123,14 @@ list_of_paper_ids = [
 ]
 
 subset_of_papers_ids = [
-    "astro-ph/0101271",
-    "1605.02385",
-    "0908.2474",
-    "1610.04816",
-    "1901.00305",
-    "1409.1557",
-    "1710.03830",
-    "1902.05953",
-    "1012.2145",
-    "1008.4706",
+    "1012.2079",
+    "astro-ph/9808217",
+    "2104.04052",
+    "1305.1964",
+    "1909.03906",
+    "1709.03376",
+    "1709.07867",
+    "2103.07040",
 ]
 
 test_paper = ["math-ph/0303034"]
@@ -243,7 +241,7 @@ def create_database(dbname):
 
     cur.execute("CREATE TABLE reference_tree ({})".format(",".join(FIELDS_TO_STORE)))
 
-    for i, paper_id in enumerate(test_paper):
+    for i, paper_id in enumerate(subset_of_papers_ids):
         print("process paper %s, %d" % (paper_id, i))
         filename, list_of_files = get_file(paper_id)
         if list_of_files:
@@ -329,7 +327,13 @@ def retrieve_rawdata(url):
             print(f"It took me {time2-time1:.2f}s to retrieve data from {url}.")
             return rawdata
         except urllib.error.HTTPError as e:
-            sleep_sec = int(e.hdrs.get("retry-after", 30))
+            # TODO: check this
+            # From what I have seen, the only HTTP error that does happen (at least in the test set)
+            # is with the XML server when for some references we get thrown a 'bad request'.
+            # I don't know how to fix this bad request and waiting full 30 seconds for a certain outcome
+            # of an error 400 is too much. This is why I changed this to 5 seconds, I don't know how
+            # smart this is. I guess whoever mantains this code will have to judge for themselves.
+            sleep_sec = int(e.hdrs.get("retry-after", 5))
             print("WARNING: Got %d. Retrying after %d seconds." % (e.code, sleep_sec))
             time.sleep(sleep_sec)
             if e.code == 503:
@@ -535,21 +539,29 @@ def get_citations(list_of_files, mode="xmlAPI", additionalArg=None):
                 )
                 i = 0
                 j = 0
-                while i < len(xmlbibs) - bibitemsNum:
+                while i < len(xmlbibs):
                     print(
                         f"Processing batch number {j} - bibs {i} through {i+bibitemsNum}."
                     )
-                    xml_query = create_query_batch_xml(xmlbibs[i : i + bibitemsNum])
-                    response = retrieve_rawdata(base_url + xml_query).decode()
-                    results = parse_xml_response(response)
-                    data += [extract_metadata_from_xml(res) for res in results]
+                    # Conditional to ensure the final batch of items is correct
+                    if i + bibitemsNum < len(xmlbibs):
+                        bibs = xmlbibs[i : i + bibitemsNum]
+                        xml_query = create_query_batch_xml(bibs)
+                    else:
+                        bibs = xmlbibs[i:]
+                        xml_query = create_query_batch_xml(bibs)
+                    try:
+                        response = retrieve_rawdata(base_url + xml_query).decode()
+                        results = parse_xml_response(response)
+                        data += [extract_metadata_from_xml(res) for res in results]
+                    except urllib.error.HTTPError as e: # usually a bad request
+                        # don't know how to fix a bad request exception since
+                        # I don't know what is causing the bad request
+                        # Here we use the crossref REST API
+                        for bib in bibs:
+                            data.append(crossref_metadata_from_query(bib, threshold=0, email=additionalArg))
                     i += bibitemsNum
                     j += 1
-                # Final batch
-                xml_query = create_query_batch_xml(xmlbibs[i:])
-                response = retrieve_rawdata(base_url + xml_query).decode()
-                results = parse_xml_response(response)
-                data += [extract_metadata_from_xml(res) for res in results]
                 # Add this data to the citations
                 for datum, num in zip(data, numbers):
                     citations.append((num, datum))
@@ -1185,7 +1197,10 @@ def clean_up_bibtex(bibitem: str) -> str:
     # Remove the weird ~ symbol
     # I have no idea what it is even used for in bibtex
     # Replace with whitespace though
-    bibitem = bibitem.translate({"~": " "})
+    bibitem = bibitem.translate({"~": " "}) # for some reason this doesn't work??
+    for i in range(len(bibitem)):
+        if bibitem[i] == "~":
+            bibitem = bibitem[:i] + ' ' + bibitem[i+1:]
     # Remove reduntant white space
     pattern = re.compile(r"\s{2,}")
     bibitem = re.sub(pattern, " ", bibitem)
@@ -1223,7 +1238,9 @@ def create_query_batch_xml(clean_bibitems: list):
 
 # TODO: lots of these fields might not work a 100% because a list comes in the way
 # check for list an extract that way
-# TODO: find a common blueprint for all this
+# TODO: also some fields might not exist on occations. Every feature extraction
+# should probably be written within a try: except: clause to make sure the script
+# finishes running. If there is no such field either skip or just put "null"
 def extract_metadata_from_xml(singleresult):
     """_summary_
 
@@ -1245,10 +1262,13 @@ def extract_metadata_from_xml(singleresult):
 
             md["title"] = article_data.titles.title.cdata
             # authors
-            authors = []
-            for item in article_data.contributors.person_name:
-                authors.append(item.given_name.cdata + " " + item.surname.cdata)
-            md["authors"] = ", ".join(authors)
+            try:
+                authors = []
+                for item in article_data.contributors.person_name:
+                    authors.append(item.given_name.cdata + " " + item.surname.cdata)
+                md["authors"] = ", ".join(authors)
+            except:
+                md["authors"] = "null"
             # URL
             md["source_link"] = article_data.doi_data.resource.cdata
             # publication date
