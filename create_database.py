@@ -215,6 +215,32 @@ def create_database(
     This function takes the arxiv ids above, downloads the files for this
     paper (get_file), and extracts the citations (get_citations)
 
+    There are a few parameters that modify how the script extacts the citations
+    metadata. Here we breakdown all the function arguments.
+
+        1. dbname - name of the database in which the data will be stored
+        2. tableName - name of the table in which the data will be stored
+        3. arxivIDs - list of arXiv papers that are to be processed
+        4. mode - default "restAPI", other options are "neither" and "xmlAPI"
+                    "restAPI" uses Crossref's JSON REST API to process references
+                        that have no identifier within them
+                    "neither" only processes the references with an identifier,
+                        ignores the rest
+                    "xmlAPI" uses Crossref's XML API to process references that
+                        have no identifier within them
+        5. email - defaults to None but really should be provided, user email that
+                    is sent in the HTML GET request header to Crossref
+        6. threshold - defaults to 0, signals how certain the JSON REST API has to be
+                        in the matching, if the score of a matched reference is below
+                        this threshold the matching will be overturned and reference
+                        marked as "unresolved"
+        7. xmlQueryNum - parameter that controls how many references are to be sent
+                            at once to the XML server for processing. 5 references seem
+                            to be a good number.
+        8. xmlUseRESTAPI - True or False, defaults to True, controls whether we use the
+                            JSON REST API to process references that the XML API couldn't
+                            resolve.
+
     Currently defined columns are: paper_id, reference_num, status, ref_arxiv_id,
         DOI, title, abstract, authors, database_name, last_modified_datetime,
         authors_linked, authors_linked_short, pdf_link, source_link, arxiv_comment,
@@ -288,6 +314,9 @@ def create_database(
     # (see the first TODO below this one)
     # A parameter for the table name can, and probably should be added as well
     # since "reference_tree" is just a placeholder
+    
+    # delete the table if it already exists
+    cur.execute("DROP TABLE IF EXISTS {};".format(tableName))
     cur.execute("CREATE TABLE {} ({})".format(tableName, ",".join(FIELDS_TO_STORE)))
 
     for i, paper_id in enumerate(arxivIDs):
@@ -323,7 +352,7 @@ def create_database(
                 # with the database that is used in the final application
                 QUESTIONMARKS = ",".join(["?"] * len(md))
                 cur.execute(
-                    "INSERT INTO reference_tree VALUES ({})".format(QUESTIONMARKS),
+                    "INSERT INTO {} VALUES ({})".format(tableName, QUESTIONMARKS),
                     tuple(md.values()),
                 )
                 con.commit()
@@ -581,7 +610,7 @@ def get_citations(
                     )
                     if tip == "DOI":
                         if check_doi_registration_agency(ident) == "Crossref":
-                            md = crossref_metadata_from_doi(ident, threshold=threshold, email=email)
+                            md = crossref_metadata_from_doi(ident, email=email)
                         else:
                             md = crossref_metadata_from_query(
                                 clean_bibitems[num], threshold=0, email=email
@@ -1083,7 +1112,7 @@ def crossref_metadata_from_doi(doi: str, email=None) -> dict:
             # TODO: there is also a key called "published-print"
             # It might be more prevalent. Alternatively, either "published"
             # or "published-print" could be extracted, depending on availability
-            metadata["created_datetime"] = "-".join(work["published"]["date-parts"][0])
+            metadata["created_datetime"] = "-".join([str(item) for item in work["published"]["date-parts"][0]])
         except Exception as e:
             print(f"Couldn't get publishing date. Exception {e}")
 
@@ -1744,7 +1773,7 @@ time1 = time.time()
 create_database("test.db", 
                 "reference_tree", 
                 list_of_paper_ids, 
-                mode="restAPI",
+                mode="neither",
                 email="matejvedak@gmail.com",
                 xmlUseRESTAPI=False)
 time2 = time.time()
