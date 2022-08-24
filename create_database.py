@@ -133,7 +133,7 @@ subset_of_papers_ids = [
     "2103.07040",
 ]
 
-test_paper = ['1401.6046']
+test_paper = ["1401.6046"]
 
 
 class AttrDict(dict):
@@ -145,7 +145,7 @@ class AttrDict(dict):
     dict = AttrDict(zip(keys, values))
 
     The idea is to set a standard for a metadata dictionary so that later mistakes
-    can be avoided.
+    in assigning data can be avoided.
     """
 
     def __init__(self, *args, **kwargs):
@@ -197,20 +197,20 @@ FIELDS_TO_STORE = [
 
 
 def create_default_md_dict(fields_to_store: list) -> AttrDict:
-    values = ["null"] * len(fields_to_store)
+    values = ["Null"] * len(fields_to_store)
     return AttrDict(zip(FIELDS_TO_STORE, values))
 
 
 def create_database(
-        dbname,
-        tableName, 
-        arxivIDs,
-        mode="restAPI",
-        email=None,
-        threshold=0,
-        xmlQueryNum=5,
-        xmlUseRESTAPI=True
-    ):
+    dbname,
+    tableName,
+    arxivIDs,
+    mode="restAPI",
+    email=None,
+    threshold=0,
+    xmlQueryNum=5,
+    xmlUseRESTAPI=True,
+):
     """
     This function takes the arxiv ids above, downloads the files for this
     paper (get_file), and extracts the citations (get_citations)
@@ -284,8 +284,7 @@ def create_database(
                             NOT IMPLEMENTED
         13. pdf_link - mostly only for arxiv references. Capturing a DOI mostly
                         points to a URL in the form of a source and not the pdf itself.
-        14. source_link - for all arxiv references just put to arXiv main page.
-                        This can easily be amended knowing the arxiv IDs.
+        14. source_link - URL of the website of the reference
         15. arxiv_comment - comment relating to an arxiv paper. Can contain
                             information on where the paper was published
         16. arxiv_primary_category - hep-ex, math, cs-ai, etc.
@@ -314,7 +313,7 @@ def create_database(
     # (see the first TODO below this one)
     # A parameter for the table name can, and probably should be added as well
     # since "reference_tree" is just a placeholder
-    
+
     # delete the table if it already exists
     cur.execute("DROP TABLE IF EXISTS {};".format(tableName))
     cur.execute("CREATE TABLE {} ({})".format(tableName, ",".join(FIELDS_TO_STORE)))
@@ -323,13 +322,14 @@ def create_database(
         print("process paper %s, %d" % (paper_id, i))
         filename, list_of_files = get_file(paper_id)
         if list_of_files:
-            citations_data, clean_bibitems, bibitems = get_citations(list_of_files,
-                                                                    mode=mode,
-                                                                    email=email,
-                                                                    threshold=threshold,
-                                                                    xmlQueryNum=xmlQueryNum,
-                                                                    xmlUseRESTAPI=xmlUseRESTAPI
-                                                                )
+            citations_data, clean_bibitems, bibitems = get_citations(
+                list_of_files,
+                mode=mode,
+                email=email,
+                threshold=threshold,
+                xmlQueryNum=xmlQueryNum,
+                xmlUseRESTAPI=xmlUseRESTAPI,
+            )
             # Here we will store the citations in the database
             # citations should contain a reliable list of identifiers,
             # such as dois or arxiv_ids
@@ -466,13 +466,13 @@ def unpack_rawdata(rawdata, filename):
 
 
 def get_citations(
-        list_of_files, 
-        mode="restAPI", 
-        email=None,
-        threshold=0,
-        xmlQueryNum=5,
-        xmlUseRESTAPI=True,
-    ):
+    list_of_files,
+    mode="restAPI",
+    email=None,
+    threshold=0,
+    xmlQueryNum=5,
+    xmlUseRESTAPI=True,
+):
     """
     This function starts with a list of files which could contain
     citation information and returns a list of arxiv_ids
@@ -481,14 +481,14 @@ def get_citations(
         mode: restAPI, xmlAPI, neither
 
         restAPI will query crossref REST API for any reference
-        that has no identifier within. 
+        that has no identifier within.
         REST API has two types of servers: public pool and polite pool
         Request is handled by the public pool if no email is provided.
         This turned out to be quite fast, between 1s and 3s per reference.
         Request is handled by the polite pool if an email is provided.
         For some reason this takes much longer. Up to 10s per reference.
         Advantage of the polite pool is that crossref authors will send you an
-        email if your script is behaving in a manner they don't like. 
+        email if your script is behaving in a manner they don't like.
         With the public pool, you might simply be banned from accessing their
         services.
         Put your email in the email argument to get access to the polite
@@ -515,13 +515,13 @@ def get_citations(
         an arxiv id or a DOI will be recognized and their metadata extracted. Rest of the
         references will be saved within the same database (fields of paper_id, reference_num,
         status, bibitem, clean_bibitem will be populated). Status field will be 'ignored'.
-    
+
         email: email to be used with crossref's JSON API and XML API, optional
         threshold: threshold score that crossref JSON API returns, matched references
                     below the threshold score are marked as unresolved
         xmlQueryNum: number of references for xml to query at once
         xmlUseRESTAPI: whether the XML API will use JSON API for references that have
-                        been returned because of a 400 error (bad XML request). 
+                        been returned because of a 400 error (bad XML request).
                         Optional, defaults to True
     """
     citations = []
@@ -619,10 +619,10 @@ def get_citations(
                         md = arxiv_metadata_from_id(ident)
                     else:
                         md = crossref_metadata_from_query(
-                                list_of_clean_bibitems[num],
-                                threshold=threshold,
-                                email=email
-                            )
+                            list_of_clean_bibitems[num],
+                            threshold=threshold,
+                            email=email,
+                        )
                     # TODO: can add some NLP for references that don't pass the threshold
                     # here. Alternatively, analyze these references afterwards, pull out
                     # their data from the database
@@ -706,10 +706,12 @@ def get_citations(
                 crtCitations = [item[1] for item in crtCitations]
                 if xmlUseRESTAPI:
                     for i, md in enumerate(crtCitations):
-                        if md["status"]=="unresolved":
-                            # TODO: if there is any discrepancies or repeat metadata 
+                        if md["status"] == "unresolved":
+                            # TODO: if there is any discrepancies or repeat metadata
                             # in the final database there is a good chance it came from here
-                            newmd = crossref_metadata_from_query(list_of_clean_bibitems[i])
+                            newmd = crossref_metadata_from_query(
+                                list_of_clean_bibitems[i]
+                            )
                             crtCitations[i] = newmd
                 # TODO: add here an option of processing the unresolved references through
                 # the REST API, or, again, can implement some sort of NLP here
@@ -1109,10 +1111,9 @@ def crossref_metadata_from_doi(doi: str, email=None) -> dict:
             print(f"Couldn't get created datetime. Exception: {e}")
 
         try:
-            # TODO: there is also a key called "published-print"
-            # It might be more prevalent. Alternatively, either "published"
-            # or "published-print" could be extracted, depending on availability
-            metadata["created_datetime"] = "-".join([str(item) for item in work["published"]["date-parts"][0]])
+            metadata["created_datetime"] = "-".join(
+                [str(item) for item in work["published"]["date-parts"][0]]
+            )
         except Exception as e:
             print(f"Couldn't get publishing date. Exception {e}")
 
@@ -1456,11 +1457,11 @@ def extract_metadata_from_xml(singleresult):
                     try:
                         givname = item.given_name.cdata
                     except:
-                        givname = ''
+                        givname = ""
                     try:
                         surname = item.surname.cdata
                     except:
-                        surname = ''
+                        surname = ""
                     authors.append(givname + " " + surname)
                 md["authors"] = ", ".join(authors)
             except Exception as e:
@@ -1506,11 +1507,11 @@ def extract_metadata_from_xml(singleresult):
                     try:
                         givname = item.given_name.cdata
                     except:
-                        givname = ''
+                        givname = ""
                     try:
                         surname = item.surname.cdata
                     except:
-                        surname = ''
+                        surname = ""
                     authors.append(givname + " " + surname)
                 md["authors"] = ", ".join(authors)
             except Exception as e:
@@ -1550,11 +1551,11 @@ def extract_metadata_from_xml(singleresult):
                     try:
                         givname = item.given_name.cdata
                     except:
-                        givname = ''
+                        givname = ""
                     try:
                         surname = item.surname.cdata
                     except:
-                        surname = ''
+                        surname = ""
                     authors.append(givname + " " + surname)
                 md["authors"] = ", ".join(authors)
             except Exception as e:
@@ -1604,11 +1605,11 @@ def extract_metadata_from_xml(singleresult):
                     try:
                         givname = name.given_name.cdata
                     except:
-                        givname = ''
+                        givname = ""
                     try:
                         surname = name.surname.cdata
                     except:
-                        surname = ''
+                        surname = ""
                     authors.append(givname + " " + surname)
                 md["authors"] = ", ".join(authors)
             except Exception as e:
@@ -1666,11 +1667,11 @@ def extract_metadata_from_xml(singleresult):
                     try:
                         givname = name.given_name.cdata
                     except:
-                        givname = ''
+                        givname = ""
                     try:
                         surname = name.surname.cdata
                     except:
-                        surname = ''
+                        surname = ""
                     authors.append(givname + " " + surname)
                 md["authors"] = ", ".join(authors)
             except Exception as e:
@@ -1719,11 +1720,11 @@ def extract_metadata_from_xml(singleresult):
                     try:
                         givname = name.given_name.cdata
                     except:
-                        givname = ''
+                        givname = ""
                     try:
                         surname = name.surname.cdata
                     except:
-                        surname = ''
+                        surname = ""
                     authors.append(givname + " " + surname)
                 md["authors"] = ", ".join(authors)
             except Exception as e:
@@ -1770,18 +1771,17 @@ def extract_metadata_from_xml(singleresult):
 
 
 time1 = time.time()
-create_database("test.db", 
-                "reference_tree", 
-                list_of_paper_ids, 
-                mode="neither",
-                email="matejvedak@gmail.com",
-                xmlUseRESTAPI=False)
+create_database(
+    "test.db",
+    "reference_tree",
+    list_of_paper_ids,
+    mode="neither",
+    email="matejvedak@gmail.com",
+    xmlUseRESTAPI=False,
+)
 time2 = time.time()
 print(f"It took me {time2-time1:.2f}s to process a 100 papers.")
 print(f"This is equal to {(time2-time1)/3600:.2f} hours.")
 print(
     f"At this rate, it would take me {(time2-time1)/3600*20:.2f} hours to process 2000 papers."
 )
-
-# TODO: test this DOI 10.1086/157250
-# publishing date isn't extracted
