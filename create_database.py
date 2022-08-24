@@ -395,9 +395,6 @@ def get_file(paper_id):
 
 
 def retrieve_rawdata(url):
-    # TODO: remake this function
-    # don't wait as long for a response, just keep going
-    # or rather, create a special retrieve_data for crossref xml that doesn't wait
     """
     This function gets the data from a web location and returns the
     raw data
@@ -413,7 +410,6 @@ def retrieve_rawdata(url):
             print(f"It took me {time2-time1:.2f}s to retrieve data from {url}.")
             return rawdata
         except urllib.error.HTTPError as e:
-            # TODO: check this
             # From what I have seen, the only HTTP error that does happen (at least in the test set)
             # is with the XML server when for some references we get thrown a 'bad request'.
             # I don't know how to fix this bad request and waiting full 30 seconds for a certain outcome
@@ -707,14 +703,12 @@ def get_citations(
                 if xmlUseRESTAPI:
                     for i, md in enumerate(crtCitations):
                         if md["status"] == "unresolved":
-                            # TODO: if there is any discrepancies or repeat metadata
-                            # in the final database there is a good chance it came from here
                             newmd = crossref_metadata_from_query(
-                                list_of_clean_bibitems[i]
+                                list_of_clean_bibitems[i],
+                                threshold=threshold,
+                                email=email
                             )
                             crtCitations[i] = newmd
-                # TODO: add here an option of processing the unresolved references through
-                # the REST API, or, again, can implement some sort of NLP here
                 citations += crtCitations
             elif mode == "neither":
                 for num, ident, tip in identifiers:
@@ -1404,11 +1398,6 @@ def parse_xml_response(response):
     return results
 
 
-# TODO: lots of these fields might not work a 100% because a list comes in the way
-# check for list an extract that way
-# TODO: also some fields might not exist on occations. Every feature extraction
-# should probably be written within a try: except: clause to make sure the script
-# finishes running. If there is no such field either skip or just put "null"
 def extract_metadata_from_xml(singleresult):
     """
     This function extracts the metadata for a response from the XML server.
@@ -1441,7 +1430,6 @@ def extract_metadata_from_xml(singleresult):
         md["type"] = singleresult.doi["type"]  # type of publication
 
         if singleresult.doi["type"] == "journal_article":
-            # TODO: possible script breaking here, investigate
             article_data = singleresult.doi_record.crossref.journal.journal_article
             journal_data = singleresult.doi_record.crossref.journal.journal_metadata
 
