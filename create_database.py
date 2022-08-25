@@ -1305,11 +1305,19 @@ def crossref_metadata_from_query(bibitem: str, threshold=0, email=None) -> dict:
 
 
 def clean_up_bibtex(bibitem: str) -> str:
-    """
+    r"""
     This function cleans up a bibtex entry. It removes unnecessary characters in an
     attempt to improve matching precision and improve matching speed.
 
     Currently it cleans up:
+        1. Removes text from the beggining if that text
+            is enclosed in "{}" parentheses or "[]" parenthesis
+        2. Cleans up substrings that start with "\" and enclose some text.
+         E.g. \em{}
+        3. Cleans up items like \newblock which are bibtex commands
+        4. Removes "\n" and remaining "{}[]\"'%" characters
+        5. Removes the weird ~ character
+        6. Removes the reduntant white space
 
     Args:
         bibitem (str): full bibtex reference entry
@@ -1763,8 +1771,8 @@ create_database(
     "test.db",
     "reference_tree",
     list_of_paper_ids,
-    mode="neither",
-    email="matejvedak@gmail.com",
+    mode="restAPI",
+    email=None,
     xmlUseRESTAPI=False,
 )
 time2 = time.time()
